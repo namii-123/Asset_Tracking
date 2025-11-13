@@ -7,14 +7,13 @@ import { getStorage } from "firebase/storage";
 
 //Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyBawioJ6qGT5ZiYI4U1AI_f3w0a6tylkHo",
-  authDomain: "asset-tracking-f8aeb.firebaseapp.com",
-  databaseURL: "https://asset-tracking-f8aeb-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "asset-tracking-f8aeb",
-  storageBucket: "asset-tracking-f8aeb.appspot.com", 
-  messagingSenderId: "840883319763",
-  appId: "1:840883319763:web:55d9774296ac421caa7526",
-  measurementId: "G-L0EZGB96MC"
+  apiKey: "AIzaSyBauK_4tqQOiRJUstFbFuEEk1zcDO72FII",
+  authDomain: "ppgloginsystem-298a9.firebaseapp.com",
+  projectId: "ppgloginsystem-298a9",
+  storageBucket: "ppgloginsystem-298a9.firebasestorage.app",
+  messagingSenderId: "849262140961",
+  appId: "1:849262140961:web:4be829946c48da9f0b4d60",
+  measurementId: "G-GWGMHPX7T5"
 };
 
 // Initialize Firebase

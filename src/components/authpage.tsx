@@ -1,16 +1,22 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom"; // ✅ import navigate
+import { useNavigate } from "react-router-dom";
 import Login from "./Login";
-import Registe from "./Register";
-import "../assets/auth.css"; // Import your CSS file
+import Register from "./Register";
+import "../assets/auth.css";
 
 export default function AuthPage() {
   const [isRegistering, setIsRegistering] = useState(false);
-  const navigate = useNavigate(); // ✅ for programmatic navigation
+  const [prefilledEmail, setPrefilledEmail] = useState("");
+  const navigate = useNavigate();
 
-  // These states are optional — if you need them to match your Dashboard
-  const [currentView, setCurrentView] = useState("");
-  const [activeView, setActiveView] = useState("");
+  const toggleForm = (email?: string) => {
+    setIsRegistering((prev) => !prev);
+    if (email) {
+      setPrefilledEmail(email);
+    } else {
+      setPrefilledEmail("");
+    }
+  };
 
   useEffect(() => {
     const wrapper = document.querySelector(".auth-wrapper") as HTMLElement;
@@ -34,47 +40,31 @@ export default function AuthPage() {
       <div className="auth-wrapper">
         <div className="auth-left">
           <div className="logo-container">
-            {/* ✅ Clickable logo with navigate */}
             <div
-              onClick={() => {
-                setCurrentView("dashboard");
-                setActiveView("dashboard");
-                navigate("/dashadmin");
-              }}
+              onClick={() => navigate("/dashadmin")}
               role="button"
               tabIndex={0}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
-                  setCurrentView("dashboard");
-                  setActiveView("dashboard");
                   navigate("/dashadmin");
                 }
               }}
               style={{ cursor: "pointer", display: "inline-block" }}
               aria-label="Go to dashadmin"
             >
-              <img
-                className="rounded-logo"
-                src="/dohlogo1.png"
-                alt="DOH Logo"
-              />
+              <img className="rounded-logo" src="/dohlogo1.png" alt="DOH Logo" />
             </div>
-
             <h1>Department of Health</h1>
             <h2>Treatment & Rehabilitation Center - Argao</h2>
             <p>IT Asset Tracking System</p>
           </div>
         </div>
 
-        <div
-          className={`auth-right ${
-            isRegistering ? "slide-left" : "slide-right"
-          }`}
-        >
+        <div className={`auth-right ${isRegistering ? "slide-left" : "slide-right"}`}>
           {isRegistering ? (
-            <Registe toggle={() => setIsRegistering(false)} />
+            <Register toggle={toggleForm} />
           ) : (
-            <Login toggle={() => setIsRegistering(true)} />
+            <Login toggle={() => toggleForm()} prefilledEmail={prefilledEmail} />
           )}
         </div>
       </div>
