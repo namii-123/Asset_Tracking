@@ -1,17 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import "../../assets/dashboard.css";
 import "../../assets/notification.css";
-import WebQRScanner from "./qrscanner";
 
-// Single line comment   import QRCodeGenerator from "./qrcodegenerator";
+
+
 import ProfilePage from "./ProfilePage";
-//import Reports from "./Reports";
-import ReportsAnalytics from "./ReportsAnalytics";
 import { Link } from 'react-router-dom';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 import AssetManagement from './AssetManagement';
 import { Package } from 'lucide-react';
-import People from "./People";
 import Requests from "./Requests";
 import { Clipboard } from "react-feather"; 
 import { useNavigate } from "react-router-dom";
@@ -37,8 +34,7 @@ import {
   doc, 
   updateDoc 
 } from "firebase/firestore";
-// import RequestConsumables from './RequestConsumable';
-//import ManageConsumableRequests from './ManageConsumableRequests';
+
 
 const Dashboard = () => {
   const { fullName, loading } = useCurrentUserFullName();
@@ -291,30 +287,28 @@ const Dashboard = () => {
       <div className={`dashboard-container ${sidebarCollapsed ? 'collapsed' : ''}`}>
         <aside className="sidebar">
           <div className="sidebar-header">
-            <div
-              onClick={() => {
-                setCurrentView('dashboard');
-                setActiveView('dashboard');
-                navigate('/dashadmin');
-              }}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  setCurrentView('dashboard');
-                  setActiveView('dashboard');
-                  navigate('/dashadmin');
-                }
-              }}
-              style={{ cursor: 'pointer', display: 'inline-block' }}
-              aria-label="Go to dashadmin"
-            >
-              <img
-                className="dashboard-logos"
-                src="/logosaproject.jpg"
-                alt="DOH Logo"
-              />
-            </div>
+          <div
+  onClick={() => {
+    setCurrentView('assets');
+    setActiveView('assets');
+  }}
+  role="button"
+  tabIndex={0}
+  onKeyDown={(e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      setCurrentView('assets');
+      setActiveView('assets');
+    }
+  }}
+  style={{ cursor: 'pointer', display: 'inline-block' }}
+  aria-label="Go to Asset Management"
+>
+  <img
+    className="dashboard-logos"
+    src="/logosaproject.jpg"
+    alt="DOH Logo"
+  />
+</div>
             <div className="logo-doh">DOH-TRC Argao</div>
             <button className="toggle-sidebar-btns" onClick={toggleSidebar}>
               ☰
@@ -700,14 +694,13 @@ const Dashboard = () => {
               </div>
             )}
             {currentView === 'assets' && <AssetManagement />}
-            {currentView === 'qr' && <WebQRScanner />}
+            
            
             {currentView === 'profile' && <ProfilePage />}
            {/*  {currentView === 'reports' && <Reports />}*/}
            
           
-            {currentView === 'reports-analytics' && <ReportsAnalytics />}
-            {currentView === 'people' && <People />}
+         
             {currentView === 'requestsdata' && <Requests />}
           </div>
         </div>
