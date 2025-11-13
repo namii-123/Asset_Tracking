@@ -4,7 +4,7 @@ import axios from "axios";
 import { FaCamera } from "react-icons/fa";
 import { toast } from "react-toastify";
 
-import { auth, db } from "../../firebase/firebase"; // adjust if needed
+import { auth, db } from "../../firebase/firebase"; 
 import {
   doc,
   getDoc,

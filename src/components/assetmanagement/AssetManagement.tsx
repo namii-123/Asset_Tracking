@@ -16,7 +16,6 @@ import {
   addDoc,
   where
 } from 'firebase/firestore';
-import QRModal from './QRModal';
 import { toast } from 'react-toastify';
 import HistoryModal from './HistoryModal';
 import EditAssetModal from './EditAssetModal';
@@ -735,7 +734,7 @@ const AssetManagement: React.FC = () => {
         assetName={historyAsset?.name || 'Asset'}
       />
 
-      <QRModal isOpen={showQR} onClose={() => setShowQR(false)} asset={qrAsset} />
+     
     </div>
   );
 };
