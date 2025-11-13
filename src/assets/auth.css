@@ -186,10 +186,10 @@ input::placeholder {
 }
 
 .register-row > div label {
-  margin-bottom: 0.5rem;
-  min-height: 2.5rem;
-  display: flex;
-  align-items: flex-start;
+  margin-bottom: -0.5rem;
+    min-height: 2.5rem;
+    display: flex;
+    align-items: flex-start;
 }
 
 /* Buttons */

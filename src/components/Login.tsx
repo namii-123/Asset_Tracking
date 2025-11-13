@@ -246,7 +246,7 @@ export default function LoginForm({
   return (
     <div className="form-card">
       <div className="login-head">
-        <h2>Log In</h2>
+        <h2>Sign In</h2>
       </div>
 
       <form onSubmit={handleLogin}>
@@ -278,7 +278,7 @@ export default function LoginForm({
         </label>
 
         <button className="login-button" type="submit">
-          Login
+          Sign In
         </button>
       </form>
 
