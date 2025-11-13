@@ -32,7 +32,7 @@ import Trial from './components/superadmin/trial';
 import RequireAuth from "./components/RequireAuth";
 import DeletedAssets from './components/assetmanagement/DeletedAssets';
 //import RequestConsumables from "./components/assetmanagement/RequestConsumable";
-import ManageConsumableRequests from "./components/assetmanagement/ManageConsumableRequests";
+//import ManageConsumableRequests from "./components/assetmanagement/ManageConsumableRequests";
 
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
