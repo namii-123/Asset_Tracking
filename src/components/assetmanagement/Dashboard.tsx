@@ -1,10 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import "../../assets/dashboard.css";
 import "../../assets/notification.css";
-
-
-
-import ProfilePage from "./ProfilePage";
 import { Link } from 'react-router-dom';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 import AssetManagement from './AssetManagement';
@@ -413,17 +409,7 @@ const Dashboard = () => {
               <span>QR Scanner</span>
             </Link>
 
-            {/* <Link
-              to="#"
-              className={`menu-item ${activeView === 'requestsdata' ? 'active' : ''}`}
-              onClick={() => {
-                setCurrentView('requestsdata');
-                setActiveView('requestsdata');
-              }}
-            >
-              <Clipboard className="menu-icon" />
-              <span>Request</span>
-            </Link> */}
+            
 
             <Link
               to="/"
@@ -696,9 +682,7 @@ const Dashboard = () => {
             {currentView === 'assets' && <AssetManagement />}
             
            
-            {currentView === 'profile' && <ProfilePage />}
-           {/*  {currentView === 'reports' && <Reports />}*/}
-           
+          
           
          
             {currentView === 'requestsdata' && <Requests />}
