@@ -35,8 +35,6 @@ const App: React.FC = () => {
 
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/assets" element={<AssetManagement />} />
-             
-            
               <Route path="/deleted-assets" element={<DeletedAssets />} />
               
             </Route>

@@ -13,6 +13,8 @@ import { createUserWithEmailAndPassword } from "firebase/auth";
 import { db, auth } from "../firebase/firebase";
 import emailjs from "@emailjs/browser";
 import { toast } from "react-toastify";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faEye } from "@fortawesome/free-solid-svg-icons";
 
 const EMAILJS_PUBLIC_KEY = "oiiPTVJU2reQ831XC";
 const EMAILJS_SERVICE_ID = "service_nb6i81u";
@@ -250,17 +252,19 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
         </div>
 
         {/* Contact */}
-        <label>Contact Number</label>
-        <input
-          type="text"
-          placeholder="09171234567"
-          required
-          value={contactNumber}
-          onChange={onContactChange}
-          maxLength={11}
-        />
-        {contactError && <p className="text-red-600 text-xs">{contactError}</p>}
-
+<label className="form-label">Contact Number</label>
+<input
+  type="text"
+  placeholder="09171234567"
+  required
+  value={contactNumber}
+  onChange={onContactChange}
+  maxLength={11}
+  className="form-input"
+/>
+{contactError && (
+  <p className="form-error">{contactError}</p>
+)}
         {/* Email */}
         <label>Email for Verification</label>
         <input
@@ -274,21 +278,25 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
         {/* ID Picture */}
         <label>ID Picture (max 1 MB)</label>
         {idPicture && (
-          <button
-            type="button"
-            className="mb-2 rounded bg-primary px-3 py-1 text-white"
-            onClick={() => {
-              const url = URL.createObjectURL(idPicture);
-              const win = window.open();
-              win?.document.write(
-                `<html><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;">
-                   <img src="${url}" style="max-width:100%;max-height:100%;"/>
-                 </body></html>`
-              );
-            }}
-          >
-            Preview
-          </button>
+        <button
+  type="button"
+  className="preview-btn"
+  onClick={() => {
+    const url = URL.createObjectURL(idPicture);
+    const win = window.open();
+    win?.document.write(
+      `<html>
+         <head><title>ID Preview</title></head>
+         <body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh;overflow:hidden;">
+           <img src="${url}" style="max-width:98%;max-height:98%;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.5);"/>
+         </body>
+       </html>`
+    );
+  }}
+>
+  <FontAwesomeIcon icon={faEye} />
+  Preview
+</button>
         )}
         <input
           type="file"
