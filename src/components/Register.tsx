@@ -1,5 +1,6 @@
+"use client";
+
 import { useState, useEffect } from "react";
-import { db, auth } from "../firebase/firebase"; 
 import {
   addDoc,
   collection,
@@ -9,206 +10,196 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { createUserWithEmailAndPassword } from "firebase/auth";
+import { db, auth } from "../firebase/firebase";
 import emailjs from "@emailjs/browser";
-import { toast } from "react-toastify"
-const EMAILJS_PUBLIC_KEY = 'oiiPTVJU2reQ831XC';
-const EMAILJS_SERVICE_ID = 'service_nb6i81u';
-const EMAILJS_TEMPLATE_ID = 'template_6qph2gb';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faEye } from '@fortawesome/free-solid-svg-icons';
+import { toast } from "react-toastify";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faEye } from "@fortawesome/free-solid-svg-icons";
 
-// Helper: Validate password strength
-const validatePassword = (password: string) => {
-  const errors = [];
-  if (password.length < 8) errors.push("At least 8 characters");
-  if (!/[A-Z]/.test(password)) errors.push("Include uppercase letter");
-  if (!/[a-z]/.test(password)) errors.push("Include lowercase letter");
-  if (!/\d/.test(password)) errors.push("Include numeric character");
-  return errors;
+const EMAILJS_PUBLIC_KEY = "oiiPTVJU2reQ831XC";
+const EMAILJS_SERVICE_ID = "service_nb6i81u";
+const EMAILJS_TEMPLATE_ID = "template_6qph2gb";
+
+/* ---------- VALIDATION HELPERS ---------- */
+const validatePassword = (pwd: string) => {
+  const e: string[] = [];
+  if (pwd.length < 8) e.push("At least 8 characters");
+  if (!/[A-Z]/.test(pwd)) e.push("Include uppercase letter");
+  if (!/[a-z]/.test(pwd)) e.push("Include lowercase letter");
+  if (!/\d/.test(pwd)) e.push("Include numeric character");
+  return e;
 };
 
+const validateMiddleInitial = (v: string) =>
+  !v ? null : v.length > 1 ? "1 letter only" : /^[A-Za-z]$/.test(v) ? null : "Letter only";
+
+const validateContact = (n: string) => {
+  const clean = n.replace(/\D/g, "");
+  if (!clean) return "Required";
+  if (clean.length !== 11) return "Exactly 11 digits";
+  if (!/^09/.test(clean)) return "Must start with 09";
+  return null;
+};
+
+/* ---------- COMPRESS IMAGE ---------- */
+const compressImage = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const MAX = 800; // max width/height
+      let { width, height } = img;
+      if (width > height && width > MAX) {
+        height = (height * MAX) / width;
+        width = MAX;
+      } else if (height > MAX) {
+        width = (width * MAX) / height;
+        height = MAX;
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // quality 0.75 → < 1 MB guaranteed
+      resolve(canvas.toDataURL("image/jpeg", 0.75));
+    };
+    img.onerror = reject;
+  });
+
 export default function RegisterForm({ toggle }: { toggle: () => void }) {
+  /* ---------- FORM STATE ---------- */
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [middleInitial, setMiddleInitial] = useState("");
   const [position, setPosition] = useState("");
-  const [role, setRole] = useState<"Medical" | "IT" | null>(null);
-  const [username, setUsername] = useState("");
+  const [contactNumber, setContactNumber] = useState("");
   const [idPicture, setIdPicture] = useState<File | null>(null);
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPasswordTemp, setShowPasswordTemp] = useState(false);
-  const [showConfirmPasswordTemp, setShowConfirmPasswordTemp] = useState(false);
+  const [role, setRole] = useState<"Medical" | "IT" | null>(null);
 
-  // const togglePasswordVisibility = () => {
-  //   setShowPasswordTemp(true);
-  //   setTimeout(() => setShowPasswordTemp(false), 1000);
-  // };
+  const passwordErrors = validatePassword("");
+  const contactError = validateContact(contactNumber);
+  const miError = validateMiddleInitial(middleInitial);
 
-  // const toggleConfirmPasswordVisibility = () => {
-  //   setShowConfirmPasswordTemp(true);
-  //   setTimeout(() => setShowConfirmPasswordTemp(false), 1000);
-  // };
-
-  const passwordErrors = validatePassword(password);
-
+  /* ---------- LOAD ROLE FROM LOCAL storage ---------- */
   useEffect(() => {
-    const storedRole = localStorage.getItem("registerRole") as "Medical" | "IT" | null;
-    if (storedRole) {
-      setRole(storedRole);
-    }
+    const r = localStorage.getItem("registerRole") as "Medical" | "IT" | null;
+    if (r) setRole(r);
   }, []);
 
-  const fileToBase64 = (file: File) => {
-    return new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
-    });
+  /* ---------- CONTACT INPUT (numeric only) ---------- */
+  const onContactChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value.replace(/\D/g, "").slice(0, 11);
+    setContactNumber(v);
   };
 
-  // 🔑 Optional: Send custom email via Resend (via Cloud Function)
-  const sendRegistrationReceivedEmail = async (email: string, name: string) => {
-    try {
-      // Call your Cloud Function that uses Resend
-      const functions = (await import("firebase/functions")).getFunctions();
-      const httpsCallable = (await import("firebase/functions")).httpsCallable;
-      const sendEmail = httpsCallable(functions, "sendRegistrationReceivedEmail");
-      await sendEmail({ email, name });
-    } catch (error) {
-      console.warn("Failed to send confirmation email:", error);
-      // Don't block registration if email fails
-    }
+  /* ---------- MIDDLE INITIAL (1 uppercase) ---------- */
+  const onMIChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value.toUpperCase().slice(0, 1);
+    setMiddleInitial(e.target.value.toUpperCase().slice(0, 1));
   };
 
+  /* ---------- SUBMIT ---------- */
   const handleRegister = async (e: React.FormEvent) => {
-  e.preventDefault();
+    e.preventDefault();
 
-  if (!idPicture) {
-    toast.error("ID Picture is required.");
-    return;
-  }
+    if (contactError) return toast.error(contactError);
+    if (!idPicture) return toast.error("ID picture required");
+    if (miError) return toast.error(miError);
 
-  try {
-    // 🔍 Check if email or username already exists
-    const emailQuery = query(collection(db, "IT_Supply_Users"), where("Email", "==", email));
-    const emailSnapshot = await getDocs(emailQuery);
-    if (!emailSnapshot.empty) {
-      toast.error("This email is already in use.");
-      return;
+    try {
+      // ---- uniqueness checks ----
+      const [emailSnap, userSnap] = await Promise.all([
+        getDocs(query(collection(db, "IT_Supply_Users"), where("Email", "==", email))),
+        getDocs(query(collection(db, "IT_Supply_Users"), where("Username", "==", username))),
+      ]);
+      if (!emailSnap.empty) return toast.error("Email already used");
+      if (!userSnap.empty) return toast.error("Username already used");
+
+      toast.info("Creating account…");
+
+      // ---- temp password ----
+      const tempPwd = Math.random().toString(36).slice(-8);
+
+      // ---- auth user ----
+      const cred = await createUserWithEmailAndPassword(auth, email, tempPwd);
+
+      // ---- compress & base64 ----
+      const base64 = await compressImage(idPicture);
+
+      // ---- save to Firestore ----
+      await addDoc(collection(db, "IT_Supply_Users"), {
+        AuthUID: cred.user.uid,
+        Email: email,
+        Username: username,
+        FirstName: firstName,
+        LastName: lastName,
+        MiddleInitial: middleInitial,
+        Position: position,
+        ContactNumber: contactNumber,
+        Department: "",
+        Status: "approved",
+        ActivationStatus: "pending",
+        CreatedAt: serverTimestamp(),
+        IDPictureBase64: base64, // ← ALWAYS has data:image/jpeg;base64,
+      });
+
+      // ---- send email ----
+      emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+      const expire = new Date(Date.now() + 30 * 60 * 1000);
+      await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+        to_email: email,
+        passcode: tempPwd,
+        time: expire.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }),
+        login_url: window.location.origin,
+        first_name: firstName,
+      });
+
+      toast.success("Temporary password sent!");
+      toggle();
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.code?.includes("email-already") ? "Email already in use" : err.message ?? "Failed");
     }
+  };
 
-    const usernameQuery = query(collection(db, "IT_Supply_Users"), where("Username", "==", username));
-    const usernameSnapshot = await getDocs(usernameQuery);
-    if (!usernameSnapshot.empty) {
-      toast.error("This Username is already in use.");
-      return;
-    }
-
-    toast.info("Creating your account...");
-
-    // 🧩 Step 1: Generate temp password
-    const tempPassword = Math.random().toString(36).slice(-8);
-
-    // 🧩 Step 2: Create Firebase Auth account
-    const userCred = await createUserWithEmailAndPassword(auth, email, tempPassword);
-
-    // 🖼️ Step 3: Convert image to Base64
-    const idPicBase64 = await fileToBase64(idPicture);
-
-    // 🧩 Step 4: Save user info to Firestore
-    await addDoc(collection(db, "IT_Supply_Users"), {
-      AuthUID: userCred.user.uid,
-      Email: email,
-      Username: username,
-      FirstName: firstName,
-      LastName: lastName,
-      MiddleInitial: middleInitial,
-      Position: position,
-      Department: "",
-      Status: "approved", // Directly approved (skip admin)
-      ActivationStatus: "pending", // or "active" if you want
-      CreatedAt: serverTimestamp(),
-      IDPictureBase64: idPicBase64,
-    });
-
-    // 🧩 Step 5: Initialize EmailJS
-    emailjs.init({
-      publicKey: EMAILJS_PUBLIC_KEY,
-      blockHeadless: true,
-    });
-
-    // 🧩 Step 6: Send email with temp password
-    const expireTime = new Date(Date.now() + 30 * 60 * 1000);
-    const timeString = expireTime.toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: true 
-    });
-    const loginUrl = window.location.origin;
-
-    await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-      to_email: email,
-      passcode: tempPassword,
-      time: timeString,
-      login_url: loginUrl,
-      first_name: firstName,
-    });
-
-    toast.success("✅Temporary password has been emailed to you.");
-
-    // 🧩 Step 7: Reset form
-    setEmail("");
-    setUsername("");
-    setFirstName("");
-    setLastName("");
-    setMiddleInitial("");
-    setPosition("");
-    setIdPicture(null);
-
-    // Optionally switch back to login modal
-    toggle();
-
-  } catch (error: any) {
-    console.error("Registration error:", error);
-
-    if (error.code === "auth/email-already-in-use") {
-      toast.error("This email is already in use.");
-    } else if (error.code === "auth/invalid-email") {
-      toast.error("Invalid email address.");
-    } else {
-      toast.error(`Failed to register: ${error.message || "Unexpected error."}`);
-    }
-  }
-};
-
+  /* ---------- UI ---------- */
   return (
     <div className="form-card">
       <div className="login-head">
         <h2>Create an Account</h2>
       </div>
+
       <form onSubmit={handleRegister}>
         {/* Username */}
         <label>Username</label>
         <input
           type="text"
           placeholder="Username"
-          value={username}
           required
+          value={username}
           onChange={(e) => setUsername(e.target.value)}
         />
 
-        {/* First Name + Middle Initial */}
+        {/* First / Middle */}
         <div className="register-row">
           <div>
             <label>First Name</label>
             <input
               type="text"
               placeholder="First Name"
-              value={firstName}
               required
+              value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
             />
           </div>
@@ -217,31 +208,29 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
             <input
               type="text"
               placeholder="M.I."
+              maxLength={1}
               value={middleInitial}
-              onChange={(e) => setMiddleInitial(e.target.value)}
+              onChange={onMIChange}
             />
+            {miError && <p className="text-red-600 text-xs">{miError}</p>}
           </div>
         </div>
 
-        {/* Last Name + Position */}
+        {/* Last / Position */}
         <div className="register-row">
           <div>
             <label>Last Name</label>
             <input
               type="text"
               placeholder="Last Name"
-              value={lastName}
               required
+              value={lastName}
               onChange={(e) => setLastName(e.target.value)}
             />
           </div>
           <div>
-            <label>Position (Please Refer to your DOH-TRC ID)</label>
-            <select
-              value={position}
-              required
-              onChange={(e) => setPosition(e.target.value)}
-            >
+            <label>Position</label>
+            <select required value={position} onChange={(e) => setPosition(e.target.value)}>
               <option value="" disabled>
                 Position
               </option>
@@ -262,132 +251,68 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
           </div>
         </div>
 
+        {/* Contact */}
+<label className="form-label">Contact Number</label>
+<input
+  type="text"
+  placeholder="09171234567"
+  required
+  value={contactNumber}
+  onChange={onContactChange}
+  maxLength={11}
+  className="form-input"
+/>
+{contactError && (
+  <p className="form-error">{contactError}</p>
+)}
         {/* Email */}
         <label>Email for Verification</label>
         <input
           type="email"
-          placeholder="Email for Verification"
-          value={email}
+          placeholder="email@example.com"
           required
+          value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
 
-        {/* Password */}
-        {/* <label>Password</label>
-        <div className="password-wrapper">
-          <input
-            type={showPasswordTemp ? "text" : "password"}
-            placeholder="Password"
-            value={password}
-            required
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <span className="eye-icon" onClick={togglePasswordVisibility}>
-            <FontAwesomeIcon icon={faEye} />
-          </span>
-        </div> */}
-        {/* 🔒 Real-time password requirements */}
-        {/* <div style={{ marginTop: "-10px", fontSize: "12px", color: "#555" }}>
-          Password must contain:
-          <ul style={{ margin: "4px 0 0 16px", paddingLeft: 0, listStyle: "none" }}>
-            {["At least 8 characters", "Include uppercase letter", "Include lowercase letter", "Include numeric character"].map(
-              (rule) => (
-                <li
-                  key={rule}
-                  style={{
-                    color: passwordErrors.includes(rule) ? "#d32f2f" : "#2e7d32",
-                    fontWeight: passwordErrors.includes(rule) ? "normal" : "bold",
-                  }}
-                >
-                  • {rule}
-                </li>
-              )
-            )}
-          </ul>
-        </div> */}
-
-        {/* Confirm Password */}
-        {/* <label>Confirm Password</label>
-        <div className="password-wrapper">
-          <input
-            type={showConfirmPasswordTemp ? "text" : "password"}
-            placeholder="Confirm Password"
-            value={confirmPassword}
-            required
-            onChange={(e) => setConfirmPassword(e.target.value)}
-          />
-          <span className="eye-icon" onClick={toggleConfirmPasswordVisibility}>
-            <FontAwesomeIcon icon={faEye} />
-          </span>
-        </div>
-        {password && confirmPassword && password !== confirmPassword && (
-          <div style={{ color: "#d32f2f", fontSize: "12px", marginTop: "-13px" }}>
-            ❌ Passwords do not match
-          </div>
-        )} */}
-
         {/* ID Picture */}
-        <label>ID Picture (Required)</label>
+        <label>ID Picture (max 1 MB)</label>
         {idPicture && (
-          <button
-            type="button"
-            style={{
-              marginTop: "10px",
-              padding: "5px 10px",
-              backgroundColor: "#007BFF",
-              color: "#fff",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-            }}
-            onClick={() => {
-              const imageUrl = URL.createObjectURL(idPicture);
-              const newWindow = window.open();
-              if (newWindow) {
-                newWindow.document.write(`
-                  <html>
-                    <head><title>Image Preview</title></head>
-                    <body style="margin:0;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;">
-                      <img src="${imageUrl}" style="max-width:100%;max-height:100%;" />
-                    </body>
-                  </html>
-                `);
-              }
-            }}
-          >
-            Preview Image
-          </button>
+        <button
+  type="button"
+  className="preview-btn"
+  onClick={() => {
+    const url = URL.createObjectURL(idPicture);
+    const win = window.open();
+    win?.document.write(
+      `<html>
+         <head><title>ID Preview</title></head>
+         <body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh;overflow:hidden;">
+           <img src="${url}" style="max-width:98%;max-height:98%;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.5);"/>
+         </body>
+       </html>`
+    );
+  }}
+>
+  <FontAwesomeIcon icon={faEye} />
+  Preview
+</button>
         )}
         <input
-              type="file"
-              accept="image/*"
-              required
-              onChange={(e) => {
-                const file = e.target.files?.[0] || null;
-                if (file) {
-                  // ✅ 1. Must be an image
-                  if (!file.type.startsWith("image/")) {
-                    toast.error("Only image files are allowed.");
-                    e.target.value = "";
-                    setIdPicture(null);
-                    return;
-                  }
+          type="file"
+          accept="image/*"
+          required
+          onChange={(e) => {
+            const f = e.target.files?.[0] ?? null;
+            if (!f) return setIdPicture(null);
+            if (!f.type.startsWith("image/")) return toast.error("Image only");
+            if (f.size > 1024 * 1024) return toast.error("≤ 1 MB");
+            setIdPicture(f);
+          }}
+        />
 
-                  // ✅ 2. Limit file size to 1 MB (1 MB = 1024 * 1024 bytes)
-                  if (file.size > 1024 * 1024) {
-                    toast.error("Image file size cannot exceed 1MB. Please upload a smaller image.");
-                    e.target.value = "";
-                    setIdPicture(null);
-                    return;
-                  }
-                }
-                setIdPicture(file);
-              }}
-            />
-
-
-        <button type="submit" className="login-button">
-          Register
+        <button type="submit" className="login-button mt-4">
+          Sign Up
         </button>
       </form>
 
@@ -397,12 +322,3 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
