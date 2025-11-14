@@ -21,6 +21,11 @@ import {
 import { toast } from "react-toastify";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faEye } from "@fortawesome/free-solid-svg-icons";
+import emailjs from "@emailjs/browser";
+
+const EMAILJS_PUBLIC_KEY = "oiiPTVJU2reQ831XC";
+const EMAILJS_SERVICE_ID = "service_nb6i81u";
+const EMAILJS_TEMPLATE_ID = "template_s33sm7c"; // You may want a different template for verification
 
 // Define allowed status values
 type UserStatus = "email_pending" | "pending" | "approved" | "rejected";
@@ -59,6 +64,22 @@ export default function LoginForm({
   const targetAfterLogin =
     from ? `${from.pathname}${from.search}${from.hash}` : "/dashboard";
 
+  // Security: Failed login attempts
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
+  const [verificationCode, setVerificationCode] = useState("");
+  const [sentCode, setSentCode] = useState("");
+  const [userEmailForVerification, setUserEmailForVerification] = useState("");
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [verificationInput, setVerificationInput] = useState("");
+  const [codeExpiryTime, setCodeExpiryTime] = useState<Date | null>(null);
+
+  // Forgot Password
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetSent, setResetSent] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+
   // Toggle password visibility (temporary)
   const togglePasswordVisibility = () => {
     setShowPasswordTemp(true);
@@ -77,63 +98,215 @@ export default function LoginForm({
     }
   }, [prefilledEmail]);
 
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
-const [resetEmail, setResetEmail] = useState("");
-const [resetSent, setResetSent] = useState(false);
-const [resetLoading, setResetLoading] = useState(false);
-
-
-
-const handleForgotPassword = async (e: React.FormEvent) => {
-  e.preventDefault();
-  if (!resetEmail || !resetEmail.includes("@")) {
-    toast.error("Please enter a valid email address.");
-    return;
-  }
-
-  setResetLoading(true);
-  try {
-    // Check if email exists in your Firestore users
-    const q = query(collection(db, "IT_Supply_Users"), where("Email", "==", resetEmail));
-    const snap = await getDocs(q);
-
-    if (snap.empty) {
-      toast.error("No account found with this email.");
-      setResetLoading(false);
-      return;
+  // Load failed attempts from localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem(`failedAttempts_${identifier}`);
+    if (stored) {
+      const data = JSON.parse(stored);
+      const now = Date.now();
+      
+      // Check if lockout has expired (30 minutes)
+      if (data.lockedUntil && now < data.lockedUntil) {
+        setFailedAttempts(data.attempts);
+        setIsLocked(true);
+      } else if (data.lockedUntil && now >= data.lockedUntil) {
+        // Lockout expired, reset
+        localStorage.removeItem(`failedAttempts_${identifier}`);
+        setFailedAttempts(0);
+        setIsLocked(false);
+      } else {
+        setFailedAttempts(data.attempts || 0);
+      }
     }
+  }, [identifier]);
 
-    const userDoc = snap.docs[0].data();
-    const status = userDoc.Status as UserStatus;
+  // Generate 6-digit code
+  const generateVerificationCode = () => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  };
 
-    if (status === "rejected") {
-      toast.error("This account has been rejected. Contact admin.");
-      setResetLoading(false);
-      return;
+  // Send verification code via email
+  const sendVerificationCode = async (email: string, firstName: string) => {
+    const code = generateVerificationCode();
+    setSentCode(code);
+    
+    const expiryTime = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    setCodeExpiryTime(expiryTime);
+
+    try {
+      emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+      
+      await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+        to_email: email,
+        passcode: code,
+        time: expiryTime.toLocaleTimeString([], { 
+          hour: "2-digit", 
+          minute: "2-digit", 
+          hour12: true 
+        }),
+        login_url: window.location.origin,
+        first_name: firstName,
+      });
+
+      toast.success("Verification code sent to your email!");
+      return true;
+    } catch (error) {
+      console.error("Failed to send verification code:", error);
+      toast.error("Failed to send verification code. Please try again.");
+      return false;
     }
+  };
 
-    if (status === "email_pending") {
-      toast.error("Please verify your email first using the link sent during registration.");
-      setResetLoading(false);
-      return;
-    }
+  // Handle failed login attempt
+  const handleFailedAttempt = async (email: string) => {
+    const newAttempts = failedAttempts + 1;
+    setFailedAttempts(newAttempts);
 
-    // Send password reset email via Firebase Auth
-    await sendPasswordResetEmail(auth, resetEmail);
-    setResetSent(true);
-    toast.success("Password reset email sent! Check your inbox.");
-  } catch (error: any) {
-    console.error("Forgot password error:", error);
-    if (error.code === "auth/user-not-found") {
-      toast.error("No account found with this email.");
+    // Store in localStorage
+    const lockoutData: { attempts: number; timestamp: number; lockedUntil?: number } = {
+      attempts: newAttempts,
+      timestamp: Date.now(),
+    };
+
+    if (newAttempts >= 3) {
+      // Lock account for 30 minutes
+      lockoutData.lockedUntil = Date.now() + 30 * 60 * 1000;
+      setIsLocked(true);
+      localStorage.setItem(`failedAttempts_${identifier}`, JSON.stringify(lockoutData));
+
+      // Get user info for verification email
+      try {
+        const q = query(
+          collection(db, "IT_Supply_Users"), 
+          where("Email", "==", email)
+        );
+        const snap = await getDocs(q);
+        
+        if (!snap.empty) {
+          const userData = snap.docs[0].data();
+          setUserEmailForVerification(email);
+          
+          const codeSent = await sendVerificationCode(
+            email, 
+            userData.FirstName || "User"
+          );
+          
+          if (codeSent) {
+            setShowVerificationModal(true);
+            toast.warning(
+              "Too many failed attempts. Please verify your identity with the code sent to your email."
+            );
+          }
+        }
+      } catch (error) {
+        console.error("Error sending verification code:", error);
+        toast.error("Account locked for 30 minutes due to multiple failed login attempts.");
+      }
     } else {
-      toast.error("Failed to send reset email. Try again.");
+      localStorage.setItem(`failedAttempts_${identifier}`, JSON.stringify(lockoutData));
+      toast.error(`Invalid credentials. ${3 - newAttempts} attempt(s) remaining.`);
     }
-  } finally {
-    setResetLoading(false);
-  }
-};
+  };
 
+  // Verify the 6-digit code
+  const handleVerifyCode = () => {
+    if (!verificationInput) {
+      toast.error("Please enter the verification code.");
+      return;
+    }
+
+    if (codeExpiryTime && Date.now() > codeExpiryTime.getTime()) {
+      toast.error("Verification code has expired. Please request a new one.");
+      setSentCode("");
+      setShowVerificationModal(false);
+      return;
+    }
+
+    if (verificationInput === sentCode) {
+      // Reset failed attempts
+      localStorage.removeItem(`failedAttempts_${identifier}`);
+      setFailedAttempts(0);
+      setIsLocked(false);
+      setShowVerificationModal(false);
+      setVerificationInput("");
+      setSentCode("");
+      toast.success("Identity verified! You can now try logging in again.");
+    } else {
+      toast.error("Invalid verification code. Please try again.");
+    }
+  };
+
+  // Resend verification code
+  const handleResendCode = async () => {
+    if (!userEmailForVerification) return;
+
+    try {
+      const q = query(
+        collection(db, "IT_Supply_Users"), 
+        where("Email", "==", userEmailForVerification)
+      );
+      const snap = await getDocs(q);
+      
+      if (!snap.empty) {
+        const userData = snap.docs[0].data();
+        await sendVerificationCode(
+          userEmailForVerification, 
+          userData.FirstName || "User"
+        );
+      }
+    } catch (error) {
+      console.error("Error resending code:", error);
+      toast.error("Failed to resend code.");
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail || !resetEmail.includes("@")) {
+      toast.error("Please enter a valid email address.");
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const q = query(collection(db, "IT_Supply_Users"), where("Email", "==", resetEmail));
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        toast.error("No account found with this email.");
+        setResetLoading(false);
+        return;
+      }
+
+      const userDoc = snap.docs[0].data();
+      const status = userDoc.Status as UserStatus;
+
+      if (status === "rejected") {
+        toast.error("This account has been rejected. Contact admin.");
+        setResetLoading(false);
+        return;
+      }
+
+      if (status === "email_pending") {
+        toast.error("Please verify your email first using the link sent during registration.");
+        setResetLoading(false);
+        return;
+      }
+
+      await sendPasswordResetEmail(auth, resetEmail);
+      setResetSent(true);
+      toast.success("Password reset email sent! Check your inbox.");
+    } catch (error: any) {
+      console.error("Forgot password error:", error);
+      if (error.code === "auth/user-not-found") {
+        toast.error("No account found with this email.");
+      } else {
+        toast.error("Failed to send reset email. Try again.");
+      }
+    } finally {
+      setResetLoading(false);
+    }
+  };
 
   // Handle redirect result (Google Sign-In)
   useEffect(() => {
@@ -229,8 +402,15 @@ const handleForgotPassword = async (e: React.FormEvent) => {
   // Handle Email/Username + Password Login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     if (!identifier || !password) {
       toast.error("Please fill in all fields.");
+      return;
+    }
+
+    if (isLocked) {
+      toast.error("Account temporarily locked. Please verify your identity.");
+      setShowVerificationModal(true);
       return;
     }
 
@@ -250,6 +430,11 @@ const handleForgotPassword = async (e: React.FormEvent) => {
 
       const userCredential = await signInWithEmailAndPassword(auth, emailToLogin, password);
       await postSignInChecks(userCredential.user, false);
+      
+      // Reset failed attempts on successful login
+      localStorage.removeItem(`failedAttempts_${identifier}`);
+      setFailedAttempts(0);
+      
       toast.success(`Welcome, ${emailToLogin}!`);
       navigate(targetAfterLogin, { replace: true });
     } catch (error: any) {
@@ -261,8 +446,24 @@ const handleForgotPassword = async (e: React.FormEvent) => {
       ].includes(error.message)) {
         return;
       }
+      
       console.error("Login error:", error);
-      toast.error("Invalid username/email or password.");
+      
+      // Get email for failed attempt tracking
+      let emailForTracking = identifier;
+      if (!identifier.includes("@")) {
+        try {
+          const q = query(collection(db, "IT_Supply_Users"), where("Username", "==", identifier));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            emailForTracking = snap.docs[0].data().Email;
+          }
+        } catch (e) {
+          console.error("Error getting email:", e);
+        }
+      }
+      
+      await handleFailedAttempt(emailForTracking);
     }
   };
 
@@ -336,30 +537,45 @@ const handleForgotPassword = async (e: React.FormEvent) => {
           </div>
         </label>
 
-        <button className="login-button" type="submit">
-          Sign In
+        {failedAttempts > 0 && failedAttempts < 3 && (
+          <div style={{
+            padding: '0.5rem',
+            background: '#fff3cd',
+            border: '1px solid #ffc107',
+            borderRadius: '4px',
+            marginBottom: '1rem',
+            fontSize: '0.875rem',
+            color: '#856404'
+          }}>
+            Warning: {3 - failedAttempts} attempt(s) remaining before account lockout.
+          </div>
+        )}
+
+        <button className="login-button" type="submit" disabled={isLocked}>
+          {isLocked ? "Account Locked - Verify Identity" : "Sign In"}
         </button>
-     <div style={{ 
-  display: 'flex', 
-  justifyContent: 'flex-end', 
-  margin: '0.5rem 0 1rem' 
-}}>
-  <span
-    onClick={() => {
-      setShowForgotPassword(true);
-      setResetEmail(identifier || ''); // Auto-fill email if exists
-    }}
-    style={{ 
-      cursor: 'pointer', 
-      color: '#007BFF', 
-      fontSize: '0.9rem',
-      fontWeight: '500',
-      textDecoration: 'underline'
-    }}
-  >
-    Forgot Password?
-  </span>
-</div>
+        
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'flex-end', 
+          margin: '0.5rem 0 1rem' 
+        }}>
+          <span
+            onClick={() => {
+              setShowForgotPassword(true);
+              setResetEmail(identifier || '');
+            }}
+            style={{ 
+              cursor: 'pointer', 
+              color: '#007BFF', 
+              fontSize: '0.9rem',
+              fontWeight: '500',
+              textDecoration: 'underline'
+            }}
+          >
+            Forgot Password?
+          </span>
+        </div>
       </form>
 
       <div className="or-divider">or</div>
@@ -379,66 +595,140 @@ const handleForgotPassword = async (e: React.FormEvent) => {
         </span>
       </div>
 
+      {/* Verification Code Modal */}
+      {showVerificationModal && (
+        <div className="login-forgot-overlay">
+          <div className="login-forgot-modal">
+            <h3 className="login-forgot-title">Verify Your Identity</h3>
+            <p className="login-forgot-desc">
+              A 6-digit verification code has been sent to {userEmailForVerification}
+            </p>
+            <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.5rem' }}>
+              Code expires in 10 minutes
+            </p>
 
-     {showForgotPassword && (
-  <div className="login-forgot-overlay">
-    <div className="login-forgot-modal">
-      <h3 className="login-forgot-title">Reset Password</h3>
-      <p className="login-forgot-desc">
-        Enter your email to receive a password reset link.
-      </p>
+            <div className="login-forgot-form" style={{ marginTop: '1rem' }}>
+              <input
+                type="text"
+                placeholder="Enter 6-digit code"
+                value={verificationInput}
+                onChange={(e) => {
+                  const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                  setVerificationInput(value);
+                }}
+                maxLength={6}
+                className="login-forgot-input"
+                autoFocus
+                style={{ 
+                  textAlign: 'center', 
+                  fontSize: '1.5rem', 
+                  letterSpacing: '0.5rem',
+                  fontWeight: 'bold'
+                }}
+              />
+              
+              <div style={{ 
+                marginTop: '1rem', 
+                textAlign: 'center',
+                fontSize: '0.875rem'
+              }}>
+                <span 
+                  onClick={handleResendCode}
+                  style={{ 
+                    cursor: 'pointer', 
+                    color: '#007BFF',
+                    textDecoration: 'underline'
+                  }}
+                >
+                  Resend Code
+                </span>
+              </div>
 
-      {resetSent ? (
-        <div className="login-forgot-success">
-          <p>Check your email for the reset link!</p>
-          <button
-            className="login-forgot-btn login-forgot-btn-primary"
-            onClick={() => {
-              setShowForgotPassword(false);
-              setResetSent(false);
-              setResetEmail("");
-            }}
-          >
-            Back to Login
-          </button>
-        </div>
-      ) : (
-        <form onSubmit={handleForgotPassword} className="login-forgot-form">
-          <input
-            type="email"
-            placeholder="Enter your email"
-            value={resetEmail}
-            onChange={(e) => setResetEmail(e.target.value)}
-            required
-            className="login-forgot-input"
-            autoFocus
-          />
-          <div className="login-forgot-actions">
-            <button
-              type="button"
-              className="login-forgot-btn login-forgot-btn-cancel"
-              onClick={() => {
-                setShowForgotPassword(false);
-                setResetEmail("");
-                setResetSent(false);
-              }}
-              disabled={resetLoading}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="login-forgot-btn login-forgot-btn-submit"
-              disabled={resetLoading}
-            >
-              {resetLoading ? "Sending..." : "Send Reset Link"}
-            </button>
+              <div className="login-forgot-actions" style={{ marginTop: '1.5rem' }}>
+                <button
+                  type="button"
+                  className="login-forgot-btn login-forgot-btn-cancel"
+                  onClick={() => {
+                    setShowVerificationModal(false);
+                    setVerificationInput("");
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="login-forgot-btn login-forgot-btn-submit"
+                  onClick={handleVerifyCode}
+                  disabled={verificationInput.length !== 6}
+                >
+                  Verify
+                </button>
+              </div>
+            </div>
           </div>
-        </form>
+        </div>
       )}
-    </div>
-  </div>
-)}
+
+      {/* Forgot Password Modal */}
+      {showForgotPassword && (
+        <div className="login-forgot-overlay">
+          <div className="login-forgot-modal">
+            <h3 className="login-forgot-title">Reset Password</h3>
+            <p className="login-forgot-desc">
+              Enter your email to receive a password reset link.
+            </p>
+
+            {resetSent ? (
+              <div className="login-forgot-success">
+                <p>Check your email for the reset link!</p>
+                <button
+                  className="login-forgot-btn login-forgot-btn-primary"
+                  onClick={() => {
+                    setShowForgotPassword(false);
+                    setResetSent(false);
+                    setResetEmail("");
+                  }}
+                >
+                  Back to Login
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleForgotPassword} className="login-forgot-form">
+                <input
+                  type="email"
+                  placeholder="Enter your email"
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  required
+                  className="login-forgot-input"
+                  autoFocus
+                />
+                <div className="login-forgot-actions">
+                  <button
+                    type="button"
+                    className="login-forgot-btn login-forgot-btn-cancel"
+                    onClick={() => {
+                      setShowForgotPassword(false);
+                      setResetEmail("");
+                      setResetSent(false);
+                    }}
+                    disabled={resetLoading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="login-forgot-btn login-forgot-btn-submit"
+                    disabled={resetLoading}
+                  >
+                    {resetLoading ? "Sending..." : "Send Reset Link"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
