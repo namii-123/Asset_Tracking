@@ -8,6 +8,7 @@ import {
   getRedirectResult,
   type User,
   deleteUser,
+  sendPasswordResetEmail,
 } from "firebase/auth";
 import {
   collection,
@@ -75,6 +76,64 @@ export default function LoginForm({
       if (saved) setIdentifier(saved);
     }
   }, [prefilledEmail]);
+
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+const [resetEmail, setResetEmail] = useState("");
+const [resetSent, setResetSent] = useState(false);
+const [resetLoading, setResetLoading] = useState(false);
+
+
+
+const handleForgotPassword = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!resetEmail || !resetEmail.includes("@")) {
+    toast.error("Please enter a valid email address.");
+    return;
+  }
+
+  setResetLoading(true);
+  try {
+    // Check if email exists in your Firestore users
+    const q = query(collection(db, "IT_Supply_Users"), where("Email", "==", resetEmail));
+    const snap = await getDocs(q);
+
+    if (snap.empty) {
+      toast.error("No account found with this email.");
+      setResetLoading(false);
+      return;
+    }
+
+    const userDoc = snap.docs[0].data();
+    const status = userDoc.Status as UserStatus;
+
+    if (status === "rejected") {
+      toast.error("This account has been rejected. Contact admin.");
+      setResetLoading(false);
+      return;
+    }
+
+    if (status === "email_pending") {
+      toast.error("Please verify your email first using the link sent during registration.");
+      setResetLoading(false);
+      return;
+    }
+
+    // Send password reset email via Firebase Auth
+    await sendPasswordResetEmail(auth, resetEmail);
+    setResetSent(true);
+    toast.success("Password reset email sent! Check your inbox.");
+  } catch (error: any) {
+    console.error("Forgot password error:", error);
+    if (error.code === "auth/user-not-found") {
+      toast.error("No account found with this email.");
+    } else {
+      toast.error("Failed to send reset email. Try again.");
+    }
+  } finally {
+    setResetLoading(false);
+  }
+};
+
 
   // Handle redirect result (Google Sign-In)
   useEffect(() => {
@@ -280,6 +339,27 @@ export default function LoginForm({
         <button className="login-button" type="submit">
           Sign In
         </button>
+     <div style={{ 
+  display: 'flex', 
+  justifyContent: 'flex-end', 
+  margin: '0.5rem 0 1rem' 
+}}>
+  <span
+    onClick={() => {
+      setShowForgotPassword(true);
+      setResetEmail(identifier || ''); // Auto-fill email if exists
+    }}
+    style={{ 
+      cursor: 'pointer', 
+      color: '#007BFF', 
+      fontSize: '0.9rem',
+      fontWeight: '500',
+      textDecoration: 'underline'
+    }}
+  >
+    Forgot Password?
+  </span>
+</div>
       </form>
 
       <div className="or-divider">or</div>
@@ -298,6 +378,67 @@ export default function LoginForm({
           Register
         </span>
       </div>
+
+
+     {showForgotPassword && (
+  <div className="login-forgot-overlay">
+    <div className="login-forgot-modal">
+      <h3 className="login-forgot-title">Reset Password</h3>
+      <p className="login-forgot-desc">
+        Enter your email to receive a password reset link.
+      </p>
+
+      {resetSent ? (
+        <div className="login-forgot-success">
+          <p>Check your email for the reset link!</p>
+          <button
+            className="login-forgot-btn login-forgot-btn-primary"
+            onClick={() => {
+              setShowForgotPassword(false);
+              setResetSent(false);
+              setResetEmail("");
+            }}
+          >
+            Back to Login
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={handleForgotPassword} className="login-forgot-form">
+          <input
+            type="email"
+            placeholder="Enter your email"
+            value={resetEmail}
+            onChange={(e) => setResetEmail(e.target.value)}
+            required
+            className="login-forgot-input"
+            autoFocus
+          />
+          <div className="login-forgot-actions">
+            <button
+              type="button"
+              className="login-forgot-btn login-forgot-btn-cancel"
+              onClick={() => {
+                setShowForgotPassword(false);
+                setResetEmail("");
+                setResetSent(false);
+              }}
+              disabled={resetLoading}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="login-forgot-btn login-forgot-btn-submit"
+              disabled={resetLoading}
+            >
+              {resetLoading ? "Sending..." : "Send Reset Link"}
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  </div>
+)}
     </div>
   );
 }
