@@ -1,1 +1,1 @@
-![Node.js CI](https://github.com/nami-123/Asset_Tracking/actions/workflows/node.js.yml/badge.svg)
+[![Node.js CI](https://github.com/nami-123/Asset_Tracking/actions/workflows/node-ci.yml/badge.svg)](https://github.com/nami-123/Asset_Tracking/actions/workflows/node-ci.yml)
