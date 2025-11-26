@@ -21,19 +21,19 @@ const EMAILJS_SERVICE_ID = "service_nb6i81u";
 const EMAILJS_TEMPLATE_ID = "template_6qph2gb";
 
 /* ---------- VALIDATION HELPERS ---------- */
-const validatePassword = (pwd: string) => {
-  const e: string[] = [];
-  if (pwd.length < 8) e.push("At least 8 characters");
-  if (!/[A-Z]/.test(pwd)) e.push("Include uppercase letter");
-  if (!/[a-z]/.test(pwd)) e.push("Include lowercase letter");
-  if (!/\d/.test(pwd)) e.push("Include numeric character");
-  return e;
+const validatePassword = (pwd: string): string[] => {
+  const errors: string[] = [];
+  if (pwd.length < 8) errors.push("At least 8 characters");
+  if (!/[A-Z]/.test(pwd)) errors.push("Include uppercase letter");
+  if (!/[a-z]/.test(pwd)) errors.push("Include lowercase letter");
+  if (!/\d/.test(pwd)) errors.push("Include numeric character");
+  return errors;
 };
 
-const validateMiddleInitial = (v: string) =>
+const validateMiddleInitial = (v: string): string | null =>
   !v ? null : v.length > 1 ? "1 letter only" : /^[A-Za-z]$/.test(v) ? null : "Letter only";
 
-const validateContact = (n: string) => {
+const validateContact = (n: string): string | null => {
   const clean = n.replace(/\D/g, "");
   if (!clean) return "Required";
   if (clean.length !== 11) return "Exactly 11 digits";
@@ -55,7 +55,7 @@ const compressImage = (file: File): Promise<string> =>
 
     img.onload = () => {
       const canvas = document.createElement("canvas");
-      const MAX = 800; // max width/height
+      const MAX = 800;
       let { width, height } = img;
       if (width > height && width > MAX) {
         height = (height * MAX) / width;
@@ -66,10 +66,9 @@ const compressImage = (file: File): Promise<string> =>
       }
       canvas.width = width;
       canvas.height = height;
-      const ctx = canvas.getContext("2d")!;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("Canvas context failed"));
       ctx.drawImage(img, 0, 0, width, height);
-
-      // quality 0.75 → < 1 MB guaranteed
       resolve(canvas.toDataURL("image/jpeg", 0.75));
     };
     img.onerror = reject;
@@ -87,11 +86,10 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
   const [idPicture, setIdPicture] = useState<File | null>(null);
   const [role, setRole] = useState<"Medical" | "IT" | null>(null);
 
-  const passwordErrors = validatePassword("");
-  const contactError = validateContact(contactNumber);
   const miError = validateMiddleInitial(middleInitial);
+  const contactError = validateContact(contactNumber);
 
-  /* ---------- LOAD ROLE FROM LOCAL storage ---------- */
+  /* ---------- LOAD ROLE FROM LOCAL STORAGE ---------- */
   useEffect(() => {
     const r = localStorage.getItem("registerRole") as "Medical" | "IT" | null;
     if (r) setRole(r);
@@ -106,11 +104,11 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
   /* ---------- MIDDLE INITIAL (1 uppercase) ---------- */
   const onMIChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value.toUpperCase().slice(0, 1);
-    setMiddleInitial(e.target.value.toUpperCase().slice(0, 1));
+    setMiddleInitial(v);
   };
 
   /* ---------- SUBMIT ---------- */
-  const handleRegister = async (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     if (contactError) return toast.error(contactError);
@@ -123,40 +121,35 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
         getDocs(query(collection(db, "IT_Supply_Users"), where("Email", "==", email))),
         getDocs(query(collection(db, "IT_Supply_Users"), where("Username", "==", username))),
       ]);
+
       if (!emailSnap.empty) return toast.error("Email already used");
       if (!userSnap.empty) return toast.error("Username already used");
 
       toast.info("Creating account…");
 
-      // ---- temp password ----
       const tempPwd = Math.random().toString(36).slice(-8);
-
-      // ---- auth user ----
       const cred = await createUserWithEmailAndPassword(auth, email, tempPwd);
-
-      // ---- compress & base64 ----
       const base64 = await compressImage(idPicture);
 
-      // ---- save to Firestore ----
       await addDoc(collection(db, "IT_Supply_Users"), {
         AuthUID: cred.user.uid,
         Email: email,
         Username: username,
         FirstName: firstName,
         LastName: lastName,
-        MiddleInitial: middleInitial,
+        MiddleInitial: middleInitial || "",
         Position: position,
         ContactNumber: contactNumber,
         Department: "",
         Status: "approved",
         ActivationStatus: "pending",
         CreatedAt: serverTimestamp(),
-        IDPictureBase64: base64, // ← ALWAYS has data:image/jpeg;base64,
+        IDPictureBase64: base64,
       });
 
-      // ---- send email ----
       emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
       const expire = new Date(Date.now() + 30 * 60 * 1000);
+
       await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
         to_email: email,
         passcode: tempPwd,
@@ -173,7 +166,6 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
     }
   };
 
-  /* ---------- UI ---------- */
   return (
     <div className="form-card">
       <div className="login-head">
@@ -231,9 +223,7 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
           <div>
             <label>Position</label>
             <select required value={position} onChange={(e) => setPosition(e.target.value)}>
-              <option value="" disabled>
-                Position
-              </option>
+              <option value="" disabled>Position</option>
               {role === "Medical" ? (
                 <>
                   <option value="Clinical">Clinical</option>
@@ -252,19 +242,18 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
         </div>
 
         {/* Contact */}
-<label className="form-label">Contact Number</label>
-<input
-  type="text"
-  placeholder="09171234567"
-  required
-  value={contactNumber}
-  onChange={onContactChange}
-  maxLength={11}
-  className="form-input"
-/>
-{contactError && (
-  <p className="form-error">{contactError}</p>
-)}
+        <label className="form-label">Contact Number</label>
+        <input
+          type="text"
+          placeholder="09171234567"
+          required
+          value={contactNumber}
+          onChange={onContactChange}
+          maxLength={11}
+          className="form-input"
+        />
+        {contactError && <p className="form-error">{contactError}</p>}
+
         {/* Email */}
         <label>Email for Verification</label>
         <input
@@ -278,25 +267,26 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
         {/* ID Picture */}
         <label>ID Picture (max 1 MB)</label>
         {idPicture && (
-        <button
-  type="button"
-  className="preview-btn"
-  onClick={() => {
-    const url = URL.createObjectURL(idPicture);
-    const win = window.open();
-    win?.document.write(
-      `<html>
-         <head><title>ID Preview</title></head>
-         <body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh;overflow:hidden;">
-           <img src="${url}" style="max-width:98%;max-height:98%;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.5);"/>
-         </body>
-       </html>`
-    );
-  }}
->
-  <FontAwesomeIcon icon={faEye} />
-  Preview
-</button>
+          <button
+            type="button"
+            className="preview-btn"
+            onClick={() => {
+              const url = URL.createObjectURL(idPicture);
+              const win = window.open();
+              if (win) {
+                win.document.write(
+                  `<html>
+                    <head><title>ID Preview</title></head>
+                    <body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh;overflow:hidden;">
+                      <img src="${url}" style="max-width:98%;max-height:98%;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.5);"/>
+                    </body>
+                  </html>`
+                );
+              }
+            }}
+          >
+            <FontAwesomeIcon icon={faEye} /> Preview
+          </button>
         )}
         <input
           type="file"

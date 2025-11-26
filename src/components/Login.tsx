@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { auth, provider, db } from "../firebase/firebase";
 import {
   signInWithPopup,
   signInWithEmailAndPassword,
   signInWithRedirect,
   getRedirectResult,
-  type User,
   deleteUser,
   sendPasswordResetEmail,
+  type User,
 } from "firebase/auth";
 import {
   collection,
@@ -18,6 +17,7 @@ import {
   doc,
   updateDoc,
 } from "firebase/firestore";
+import { auth, provider, db } from "../firebase/firebase";
 import { toast } from "react-toastify";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faEye } from "@fortawesome/free-solid-svg-icons";
@@ -25,12 +25,10 @@ import emailjs from "@emailjs/browser";
 
 const EMAILJS_PUBLIC_KEY = "oiiPTVJU2reQ831XC";
 const EMAILJS_SERVICE_ID = "service_nb6i81u";
-const EMAILJS_TEMPLATE_ID = "template_s33sm7c"; // You may want a different template for verification
+const EMAILJS_TEMPLATE_ID = "template_s33sm7c";
 
-// Define allowed status values
 type UserStatus = "email_pending" | "pending" | "approved" | "rejected";
 
-// User document structure from Firestore
 interface ITSupplyUser {
   id: string;
   Email: string;
@@ -47,11 +45,10 @@ interface ITSupplyUser {
   IDPictureBase64?: string;
 }
 
-// Updated Props: Accepts prefilledEmail
-export default function LoginForm({ 
-  toggle, 
-  prefilledEmail 
-}: { 
+export default function LoginForm({
+  toggle,
+  prefilledEmail,
+}: {
   toggle: () => void;
   prefilledEmail?: string;
 }) {
@@ -64,53 +61,43 @@ export default function LoginForm({
   const targetAfterLogin =
     from ? `${from.pathname}${from.search}${from.hash}` : "/dashboard";
 
-  // Security: Failed login attempts
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
-  const [verificationCode, setVerificationCode] = useState("");
+  const [verificationInput, setVerificationInput] = useState("");
   const [sentCode, setSentCode] = useState("");
   const [userEmailForVerification, setUserEmailForVerification] = useState("");
   const [showVerificationModal, setShowVerificationModal] = useState(false);
-  const [verificationInput, setVerificationInput] = useState("");
   const [codeExpiryTime, setCodeExpiryTime] = useState<Date | null>(null);
 
-  // Forgot Password
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
   const [resetSent, setResetSent] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
 
-  // Toggle password visibility (temporary)
   const togglePasswordVisibility = () => {
     setShowPasswordTemp(true);
     setTimeout(() => setShowPasswordTemp(false), 1000);
   };
 
-  // Auto-fill email if provided from Register
   useEffect(() => {
     if (prefilledEmail) {
       setIdentifier(prefilledEmail);
       localStorage.setItem("lastIdentifier", prefilledEmail);
     } else {
-      // Fallback: load last used identifier
       const saved = localStorage.getItem("lastIdentifier");
       if (saved) setIdentifier(saved);
     }
   }, [prefilledEmail]);
 
-  // Load failed attempts from localStorage
   useEffect(() => {
     const stored = localStorage.getItem(`failedAttempts_${identifier}`);
     if (stored) {
       const data = JSON.parse(stored);
       const now = Date.now();
-      
-      // Check if lockout has expired (30 minutes)
       if (data.lockedUntil && now < data.lockedUntil) {
         setFailedAttempts(data.attempts);
         setIsLocked(true);
       } else if (data.lockedUntil && now >= data.lockedUntil) {
-        // Lockout expired, reset
         localStorage.removeItem(`failedAttempts_${identifier}`);
         setFailedAttempts(0);
         setIsLocked(false);
@@ -120,87 +107,62 @@ export default function LoginForm({
     }
   }, [identifier]);
 
-  // Generate 6-digit code
-  const generateVerificationCode = () => {
+  const generateVerificationCode = (): string => {
     return Math.floor(100000 + Math.random() * 900000).toString();
   };
 
-  // Send verification code via email
-  const sendVerificationCode = async (email: string, firstName: string) => {
+  const sendVerificationCode = async (email: string, firstName: string): Promise<boolean> => {
     const code = generateVerificationCode();
     setSentCode(code);
-    
-    const expiryTime = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const expiryTime = new Date(Date.now() + 10 * 60 * 1000);
     setCodeExpiryTime(expiryTime);
 
     try {
       emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
-      
       await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
         to_email: email,
         passcode: code,
-        time: expiryTime.toLocaleTimeString([], { 
-          hour: "2-digit", 
-          minute: "2-digit", 
-          hour12: true 
-        }),
+        time: expiryTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }),
         login_url: window.location.origin,
         first_name: firstName,
       });
-
       toast.success("Verification code sent to your email!");
       return true;
     } catch (error) {
       console.error("Failed to send verification code:", error);
-      toast.error("Failed to send verification code. Please try again.");
+      toast.error("Failed to send verification code.");
       return false;
     }
   };
 
-  // Handle failed login attempt
   const handleFailedAttempt = async (email: string) => {
     const newAttempts = failedAttempts + 1;
     setFailedAttempts(newAttempts);
 
-    // Store in localStorage
-    const lockoutData: { attempts: number; timestamp: number; lockedUntil?: number } = {
+    const lockoutData = {
       attempts: newAttempts,
       timestamp: Date.now(),
+      lockedUntil: newAttempts >= 3 ? Date.now() + 30 * 60 * 1000 : undefined,
     };
 
     if (newAttempts >= 3) {
-      // Lock account for 30 minutes
-      lockoutData.lockedUntil = Date.now() + 30 * 60 * 1000;
       setIsLocked(true);
       localStorage.setItem(`failedAttempts_${identifier}`, JSON.stringify(lockoutData));
 
-      // Get user info for verification email
       try {
-        const q = query(
-          collection(db, "IT_Supply_Users"), 
-          where("Email", "==", email)
-        );
+        const q = query(collection(db, "IT_Supply_Users"), where("Email", "==", email));
         const snap = await getDocs(q);
-        
         if (!snap.empty) {
           const userData = snap.docs[0].data();
           setUserEmailForVerification(email);
-          
-          const codeSent = await sendVerificationCode(
-            email, 
-            userData.FirstName || "User"
-          );
-          
-          if (codeSent) {
+          const sent = await sendVerificationCode(email, userData.FirstName || "User");
+          if (sent) {
             setShowVerificationModal(true);
-            toast.warning(
-              "Too many failed attempts. Please verify your identity with the code sent to your email."
-            );
+            toast.warning("Too many failed attempts. Verify your identity.");
           }
         }
-      } catch (error) {
-        console.error("Error sending verification code:", error);
-        toast.error("Account locked for 30 minutes due to multiple failed login attempts.");
+      } catch (err) {
+        toast.error("Account locked for 30 minutes.");
       }
     } else {
       localStorage.setItem(`failedAttempts_${identifier}`, JSON.stringify(lockoutData));
@@ -208,303 +170,191 @@ export default function LoginForm({
     }
   };
 
-  // Verify the 6-digit code
   const handleVerifyCode = () => {
-    if (!verificationInput) {
-      toast.error("Please enter the verification code.");
-      return;
-    }
-
+    if (!verificationInput) return toast.error("Enter the code.");
     if (codeExpiryTime && Date.now() > codeExpiryTime.getTime()) {
-      toast.error("Verification code has expired. Please request a new one.");
-      setSentCode("");
+      toast.error("Code expired.");
       setShowVerificationModal(false);
       return;
     }
-
     if (verificationInput === sentCode) {
-      // Reset failed attempts
       localStorage.removeItem(`failedAttempts_${identifier}`);
       setFailedAttempts(0);
       setIsLocked(false);
       setShowVerificationModal(false);
       setVerificationInput("");
       setSentCode("");
-      toast.success("Identity verified! You can now try logging in again.");
+      toast.success("Identity verified!");
     } else {
-      toast.error("Invalid verification code. Please try again.");
+      toast.error("Invalid code.");
     }
   };
 
-  // Resend verification code
   const handleResendCode = async () => {
     if (!userEmailForVerification) return;
-
-    try {
-      const q = query(
-        collection(db, "IT_Supply_Users"), 
-        where("Email", "==", userEmailForVerification)
-      );
-      const snap = await getDocs(q);
-      
-      if (!snap.empty) {
-        const userData = snap.docs[0].data();
-        await sendVerificationCode(
-          userEmailForVerification, 
-          userData.FirstName || "User"
-        );
-      }
-    } catch (error) {
-      console.error("Error resending code:", error);
-      toast.error("Failed to resend code.");
+    const q = query(collection(db, "IT_Supply_Users"), where("Email", "==", userEmailForVerification));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const userData = snap.docs[0].data();
+      await sendVerificationCode(userEmailForVerification, userData.FirstName || "User");
     }
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resetEmail || !resetEmail.includes("@")) {
-      toast.error("Please enter a valid email address.");
-      return;
-    }
+    if (!resetEmail || !resetEmail.includes("@")) return toast.error("Valid email required.");
 
     setResetLoading(true);
     try {
       const q = query(collection(db, "IT_Supply_Users"), where("Email", "==", resetEmail));
       const snap = await getDocs(q);
-
-      if (snap.empty) {
-        toast.error("No account found with this email.");
-        setResetLoading(false);
-        return;
-      }
+      if (snap.empty) return toast.error("No account found.");
 
       const userDoc = snap.docs[0].data();
-      const status = userDoc.Status as UserStatus;
-
-      if (status === "rejected") {
-        toast.error("This account has been rejected. Contact admin.");
-        setResetLoading(false);
-        return;
-      }
-
-      if (status === "email_pending") {
-        toast.error("Please verify your email first using the link sent during registration.");
-        setResetLoading(false);
-        return;
-      }
+      if (userDoc.Status === "rejected") return toast.error("Account rejected.");
+      if (userDoc.Status === "email_pending") return toast.error("Verify email first.");
 
       await sendPasswordResetEmail(auth, resetEmail);
       setResetSent(true);
-      toast.success("Password reset email sent! Check your inbox.");
-    } catch (error: any) {
-      console.error("Forgot password error:", error);
-      if (error.code === "auth/user-not-found") {
-        toast.error("No account found with this email.");
-      } else {
-        toast.error("Failed to send reset email. Try again.");
-      }
+      toast.success("Password reset email sent!");
+    } catch (err: any) {
+      toast.error(err.code === "auth/user-not-found" ? "No account found." : "Failed to send reset.");
     } finally {
       setResetLoading(false);
     }
   };
 
-  // Handle redirect result (Google Sign-In)
   useEffect(() => {
     (async () => {
       try {
         const result = await getRedirectResult(auth);
-        if (!result) return;
-        await postSignInChecks(result.user, true);
-        toast.success(`Signed in with Google`);
-        navigate(targetAfterLogin, { replace: true });
+        if (result) {
+          await postSignInChecks(result.user, true);
+          toast.success("Signed in with Google");
+          navigate(targetAfterLogin, { replace: true });
+        }
       } catch (e) {
-        console.error("Redirect login error:", e);
+        console.error(e);
       }
     })();
   }, [navigate, targetAfterLogin]);
 
-  // Find user document by Auth UID
   const findUserDocByAuthUID = async (uid: string): Promise<ITSupplyUser | null> => {
     const q = query(collection(db, "IT_Supply_Users"), where("AuthUID", "==", uid));
     const snapshot = await getDocs(q);
     if (snapshot.empty) return null;
 
-    const docData = snapshot.docs[0].data();
+    const data = snapshot.docs[0].data();
     const id = snapshot.docs[0].id;
 
-    if (!docData.Email || !docData.AuthUID || !docData.hasOwnProperty("Status")) {
-      console.warn("Invalid user document:", { id, ...docData });
-      return null;
-    }
-
     const validStatuses: UserStatus[] = ["email_pending", "pending", "approved", "rejected"];
-    const status = docData.Status as string;
-    if (!validStatuses.includes(status as UserStatus)) {
-      console.warn("Invalid Status:", status);
-      return null;
-    }
+    if (!validStatuses.includes(data.Status as UserStatus)) return null;
 
-    return {
-      id,
-      Email: docData.Email,
-      Username: docData.Username,
-      FirstName: docData.FirstName,
-      LastName: docData.LastName,
-      MiddleInitial: docData.MiddleInitial,
-      Position: docData.Position,
-      Department: docData.Department || "",
-      Status: status as UserStatus,
-      EmailVerified: docData.EmailVerified ?? false,
-      CreatedAt: docData.CreatedAt || new Date(),
-      AuthUID: docData.AuthUID,
-      IDPictureBase64: docData.IDPictureBase64,
-    };
+    return { id, ...data } as ITSupplyUser;
   };
 
-  // Centralized post-login checks
   const postSignInChecks = async (currentUser: User, isGoogle = false) => {
-    const { email, uid } = currentUser;
+  const { email, uid } = currentUser;
 
-    if (!email) {
-      toast.error("No email found on the account.");
-      await auth.signOut();
-      throw new Error("missing-email");
-    }
+  if (!email) {
+    toast.error("No email found on the account.");
+    await auth.signOut();
+    throw new Error("missing-email");
+  }
 
-    localStorage.setItem("lastIdentifier", email);
+  localStorage.setItem("lastIdentifier", email);
 
-    const userDoc = await findUserDocByAuthUID(uid);
-    if (!userDoc) {
-      toast.error(isGoogle
-        ? "Google account not registered in system."
+  const userDoc = await findUserDocByAuthUID(uid);
+
+  if (!userDoc) {
+  
+    toast.error(
+      isGoogle
+        ? "This Google account is not registered in the system. Please register first using the form."
         : "Account not found in system."
-      );
-      throw new Error("unregistered-user");
-    }
+    );
+    await auth.signOut();
+    throw new Error("unregistered-user");
+  }
 
-    if (userDoc.Status === "email_pending") {
-      const userRef = doc(db, "IT_Supply_Users", userDoc.id);
-      await updateDoc(userRef, { Status: "pending", EmailVerified: true });
-      toast.info("Email verified! Your registration is now pending admin approval.");
-      await auth.signOut();
-      throw new Error("awaiting-approval");
-    }
+  if (userDoc.Status === "email_pending") {
+    await updateDoc(doc(db, "IT_Supply_Users", userDoc.id), {
+      Status: "pending",
+      EmailVerified: true,
+    });
+    toast.info("Email verified! Your registration is now pending admin approval.");
+    await auth.signOut();
+    throw new Error("awaiting-approval");
+  }
 
-    if (userDoc.Status !== "approved") {
-      toast.error("Your account is pending admin approval.");
-      await auth.signOut();
-      throw new Error("not-approved");
-    }
+  if (userDoc.Status !== "approved") {
+    toast.error("Your account is pending admin approval.");
+    await auth.signOut();
+    throw new Error("not-approved");
+  }
 
-    return userDoc;
-  };
+  return userDoc;
+};
 
-  // Handle Email/Username + Password Login
+
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!identifier || !password) {
-      toast.error("Please fill in all fields.");
-      return;
-    }
-
+    if (!identifier || !password) return toast.error("Fill all fields.");
     if (isLocked) {
-      toast.error("Account temporarily locked. Please verify your identity.");
       setShowVerificationModal(true);
-      return;
+      return toast.error("Account locked.");
     }
 
     try {
       let emailToLogin = identifier;
-      localStorage.setItem("lastIdentifier", identifier);
-
       if (!identifier.includes("@")) {
         const q = query(collection(db, "IT_Supply_Users"), where("Username", "==", identifier));
         const snap = await getDocs(q);
-        if (snap.empty) {
-          toast.error("Username not found.");
-          return;
-        }
+        if (snap.empty) return toast.error("Username not found.");
         emailToLogin = snap.docs[0].data().Email;
       }
 
-      const userCredential = await signInWithEmailAndPassword(auth, emailToLogin, password);
-      await postSignInChecks(userCredential.user, false);
-      
-      // Reset failed attempts on successful login
+      localStorage.setItem("lastIdentifier", identifier);
+      const cred = await signInWithEmailAndPassword(auth, emailToLogin, password);
+      await postSignInChecks(cred.user);
+
       localStorage.removeItem(`failedAttempts_${identifier}`);
-      setFailedAttempts(0);
-      
-      toast.success(`Welcome, ${emailToLogin}!`);
+      toast.success("Welcome!");
       navigate(targetAfterLogin, { replace: true });
-    } catch (error: any) {
-      if ([
-        "missing-email",
-        "unregistered-user",
-        "awaiting-approval",
-        "not-approved"
-      ].includes(error.message)) {
-        return;
+    } catch (err: any) {
+      if (["missing-email", "unregistered-user", "awaiting-approval", "not-approved"].includes(err.message)) return;
+      let emailForTracking = identifier.includes("@") ? identifier : "";
+      if (!emailForTracking) {
+        const q = query(collection(db, "IT_Supply_Users"), where("Username", "==", identifier));
+        const snap = await getDocs(q);
+        if (!snap.empty) emailForTracking = snap.docs[0].data().Email;
       }
-      
-      console.error("Login error:", error);
-      
-      // Get email for failed attempt tracking
-      let emailForTracking = identifier;
-      if (!identifier.includes("@")) {
-        try {
-          const q = query(collection(db, "IT_Supply_Users"), where("Username", "==", identifier));
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            emailForTracking = snap.docs[0].data().Email;
-          }
-        } catch (e) {
-          console.error("Error getting email:", e);
-        }
-      }
-      
-      await handleFailedAttempt(emailForTracking);
+      await handleFailedAttempt(emailForTracking || identifier);
     }
   };
 
-  // Handle Google Sign-In
   const handleGoogleSignIn = async () => {
-    try {
-      const result = await signInWithPopup(auth, provider);
-      try {
-        await postSignInChecks(result.user, true);
-        toast.success("Signed in with Google!");
-        navigate(targetAfterLogin, { replace: true });
-      } catch (err) {
-        try {
-          await deleteUser(result.user);
-          console.log("Deleted unauthorized Google account:", result.user.email);
-        } catch (delErr) {
-          console.warn("Failed to delete account:", delErr);
-        }
-      }
-    } catch (e: any) {
-      if (
-        e?.code === "auth/popup-blocked" ||
-        e?.code === "auth/operation-not-supported-in-this-environment" ||
-        e?.code === "auth/unauthorized-domain"
-      ) {
-        await signInWithRedirect(auth, provider);
-        return;
-      }
-      if (![
-        "unregistered-user",
-        "awaiting-approval",
-        "not-approved"
-      ].some(msg => e?.message?.includes(msg))) {
-        console.error("Google Sign-In error:", e);
-        toast.error("Google Sign-In failed.");
-      }
+  try {
+    const result = await signInWithPopup(auth, provider);
+    await postSignInChecks(result.user, true);
+    toast.success("Signed in with Google!");
+    navigate(targetAfterLogin, { replace: true });
+  } catch (e: any) {
+    if (e?.code === "auth/popup-blocked") {
+      await signInWithRedirect(auth, provider);
+      return;
     }
-  };
+
+   
+    if (!["unregistered-user", "awaiting-approval", "not-approved"].some((m) => e?.message?.includes(m))) {
+      toast.error("Google Sign-In failed. Please try again.");
+    }
+  }
+};
 
   return (
-    <div className="form-card">
+      <div className="form-card">
       <div className="login-head">
         <h2>Sign In</h2>
       </div>
