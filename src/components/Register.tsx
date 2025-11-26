@@ -20,7 +20,7 @@ const EMAILJS_PUBLIC_KEY = "oiiPTVJU2reQ831XC";
 const EMAILJS_SERVICE_ID = "service_nb6i81u";
 const EMAILJS_TEMPLATE_ID = "template_6qph2gb";
 
-/* ---------- VALIDATION HELPERS ---------- */
+
 const validatePassword = (pwd: string): string[] => {
   const errors: string[] = [];
   if (pwd.length < 8) errors.push("At least 8 characters");
@@ -75,7 +75,7 @@ const compressImage = (file: File): Promise<string> =>
   });
 
 export default function RegisterForm({ toggle }: { toggle: () => void }) {
-  /* ---------- FORM STATE ---------- */
+
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -89,25 +89,25 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
   const miError = validateMiddleInitial(middleInitial);
   const contactError = validateContact(contactNumber);
 
-  /* ---------- LOAD ROLE FROM LOCAL STORAGE ---------- */
+  
   useEffect(() => {
     const r = localStorage.getItem("registerRole") as "Medical" | "IT" | null;
     if (r) setRole(r);
   }, []);
 
-  /* ---------- CONTACT INPUT (numeric only) ---------- */
+  
   const onContactChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value.replace(/\D/g, "").slice(0, 11);
     setContactNumber(v);
   };
 
-  /* ---------- MIDDLE INITIAL (1 uppercase) ---------- */
+  
   const onMIChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value.toUpperCase().slice(0, 1);
     setMiddleInitial(v);
   };
 
-  /* ---------- SUBMIT ---------- */
+  
   const handleRegister = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
@@ -116,7 +116,7 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
     if (miError) return toast.error(miError);
 
     try {
-      // ---- uniqueness checks ----
+     
       const [emailSnap, userSnap] = await Promise.all([
         getDocs(query(collection(db, "IT_Supply_Users"), where("Email", "==", email))),
         getDocs(query(collection(db, "IT_Supply_Users"), where("Username", "==", username))),
@@ -173,7 +173,7 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
       </div>
 
       <form onSubmit={handleRegister}>
-        {/* Username */}
+       
         <label>Username</label>
         <input
           type="text"
@@ -183,7 +183,7 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
           onChange={(e) => setUsername(e.target.value)}
         />
 
-        {/* First / Middle */}
+    
         <div className="register-row">
           <div>
             <label>First Name</label>
@@ -208,7 +208,6 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
           </div>
         </div>
 
-        {/* Last / Position */}
         <div className="register-row">
           <div>
             <label>Last Name</label>
@@ -241,7 +240,7 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
           </div>
         </div>
 
-        {/* Contact */}
+      
         <label className="form-label">Contact Number</label>
         <input
           type="text"
@@ -254,7 +253,7 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
         />
         {contactError && <p className="form-error">{contactError}</p>}
 
-        {/* Email */}
+      
         <label>Email for Verification</label>
         <input
           type="email"
@@ -264,7 +263,7 @@ export default function RegisterForm({ toggle }: { toggle: () => void }) {
           onChange={(e) => setEmail(e.target.value)}
         />
 
-        {/* ID Picture */}
+      
         <label>ID Picture (max 1 MB)</label>
         {idPicture && (
           <button
