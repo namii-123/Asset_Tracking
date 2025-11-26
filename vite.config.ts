@@ -16,4 +16,9 @@ export default defineConfig({
     strictPort: true,
     hmr: { host: LAN_IP, protocol: 'wss' },
   },
+   build: {
+    outDir: 'dist'  
+  }
+ 
+
 })
