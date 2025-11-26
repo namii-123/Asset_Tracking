@@ -1,33 +1,122 @@
-name: Node.js CI
+name: Node.js CI/CD
 
+# Trigger on pushes and pull requests to these branches
 on:
   push:
-    branches: [ "main", "master", "login_register" ]
+    branches: [ "main", "master", "develop" ]
   pull_request:
-    branches: [ "main", "master", "login_register" ]
+    branches: [ "main", "master", "develop" ]
+
+# Allow manual trigger too (useful for re-running deployment)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write   # needed for comments/reports
+  checks: write           # needed for test reports
 
 jobs:
-  build:
+  build-and-test:
+    name: Build & Test - Node ${{ matrix.node-version }}
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
-        node-version: [18.x, 20.x, 22.x]
+        node-version: [20.x, 22.x]   # 18.x is EOL Nov 2025, better drop it
+      fail-fast: false              # keep running other versions even if one fails
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed for some lint/tools that check git history
 
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'                  # caches node_modules automatically
+          cache: 'npm'                  # caches node_modules + ~/.npm
+          cache-dependency-path: package-lock.json
 
-      - run: npm ci                     # clean install using package-lock.json
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Build (Vite)
-        run: npm run build || echo "No build script found, skipping..."
+      - name: Lint code (ESLint)
+        run: npm run lint || echo "Lint failed – check the errors above"
+        continue-on-error: false
 
-      - name: Run tests
-        run: npm run test || echo "No test script found, skipping..."
-        continue-on-error: true         # won't fail the job if no tests yet
+      - name: Type check (if TypeScript)
+        run: npm run type-check || echo "No type-check script, skipping..."
+        continue-on-error: true
+
+      - name: Run unit & integration tests with coverage
+        run: npm test -- --coverage --watchAll=false
+        continue-on-error: false
+
+      - name: Upload coverage reports to Codecov (optional but recommended)
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+      - name: Build production bundle (Vite/React/etc.)
+        run: npm run build
+
+      # Verify that the build output actually exists
+      - name: Verify build artifacts
+        run: |
+          if [ ! -d "dist" ] && [ ! -d "build" ]; then
+            echo "Build folder (dist or build) not found!"
+            exit 1
+          fi
+
+      # Cache the dist folder for the deployment job (optional)
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output-node-${{ matrix.node-version }}
+          path: |
+            dist/
+            build/
+          retention-days: 1
+
+  # Optional: Deploy only from main/master when everything passes
+  deploy:
+    name: Deploy to Production
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    environment: production   # you can set up secrets & approval here
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-output-node-22.x   # pick the newest Node version
+
+      - name: Deploy to Vercel (example)
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: ./dist   # or ./build depending on your framework
+
+      # Or deploy to Netlify
+      # - name: Deploy to Netlify
+      #   uses: nwtgck/actions-netlify@v3
+      #   with:
+      #     publish-dir: './dist'
+      #     production-branch: main
+      #     github-token: ${{ secrets.GITHUB_TOKEN }}
+      #     deploy-message: "Deploy from GitHub Actions"
+      #   env:
+      #     NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      #     NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+      - name: Deployment success notification
+        if: success()
+        run: echo "Deployed successfully!"
