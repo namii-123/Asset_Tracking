@@ -40,9 +40,12 @@ interface ITSupplyUser {
   Department: string;
   Status: UserStatus;
   EmailVerified: boolean;
-  CreatedAt: any;
+  CreatedAt: string;
   AuthUID: string;
   IDPictureBase64?: string;
+}
+interface LocationState {
+  from?: Location;
 }
 
 export default function LoginForm({
@@ -57,7 +60,8 @@ export default function LoginForm({
   const [showPasswordTemp, setShowPasswordTemp] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as any)?.from as Location | undefined;
+  const state = location.state as LocationState | null;
+const from = state?.from;
   const targetAfterLogin =
     from ? `${from.pathname}${from.search}${from.hash}` : "/dashboard";
 
@@ -118,14 +122,19 @@ export default function LoginForm({
     setCodeExpiryTime(expiryTime);
 
     try {
-      emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
-      await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-        to_email: email,
-        passcode: code,
-        time: expiryTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }),
-        login_url: window.location.origin,
-        first_name: firstName,
-      });
+  emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+
+  await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+    to_email: email,
+    passcode: code,
+    time: expiryTime.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    first_name: firstName,
+  });
+
+
       toast.success("Verification code sent to your email!");
       return true;
     } catch (error) {
@@ -375,8 +384,8 @@ export default function LoginForm({
         await postSignInChecks(result.user, true);
         toast.success(`Signed in using ${result.user.email}`);
         navigate(targetAfterLogin, { replace: true });
-      } catch (err) {
-        // If postSignInChecks fails (e.g., unapproved), delete the auth account
+      } catch (_err) {
+       
         try {
           await deleteUser(result.user);
           console.log("Unauthorized Google account deleted:", result.user.email);
