@@ -308,12 +308,40 @@ export default function LoginForm({
 
     try {
       let emailToLogin = identifier;
-      if (!identifier.includes("@")) {
-        const q = query(collection(db, "IT_Supply_Users"), where("Username", "==", identifier));
-        const snap = await getDocs(q);
-        if (snap.empty) return toast.error("Username not found.");
-        emailToLogin = snap.docs[0].data().Email;
-      }
+
+
+// 1. CHECK USERNAME
+          if (!identifier.includes("@")) {
+            const q = query(
+              collection(db, "IT_Supply_Users"),
+              where("Username", "==", identifier)
+            );
+            const snap = await getDocs(q);
+
+            // USERNAME NOT REGISTERED → Stop and show error (NO failedAttempts increase!)
+            if (snap.empty) {
+              toast.error("Invalid credentials");
+              return;
+            }
+
+            emailToLogin = snap.docs[0].data().Email;
+          }
+
+          // 2. CHECK EMAIL
+          if (identifier.includes("@")) {
+            const q = query(
+              collection(db, "IT_Supply_Users"),
+              where("Email", "==", identifier)
+            );
+            const snap = await getDocs(q);
+
+            // EMAIL NOT REGISTERED → Stop and show error (NO failedAttempts increase!)
+            if (snap.empty) {
+              toast.error("Invalid credentials");
+              return;
+            }
+          }
+
 
       localStorage.setItem("lastIdentifier", identifier);
       const cred = await signInWithEmailAndPassword(auth, emailToLogin, password);
@@ -330,28 +358,53 @@ export default function LoginForm({
         const snap = await getDocs(q);
         if (!snap.empty) emailForTracking = snap.docs[0].data().Email;
       }
-      await handleFailedAttempt(emailForTracking || identifier);
+      // Only count failed attempts for existing users
+          if (emailForTracking) {
+            await handleFailedAttempt(emailForTracking);
+          } else {
+            toast.error("Invalid credentials");
+          }
+
     }
   };
 
   const handleGoogleSignIn = async () => {
-  try {
-    const result = await signInWithPopup(auth, provider);
-    await postSignInChecks(result.user, true);
-    toast.success("Signed in with Google!");
-    navigate(targetAfterLogin, { replace: true });
-  } catch (e: any) {
-    if (e?.code === "auth/popup-blocked") {
-      await signInWithRedirect(auth, provider);
-      return;
+    try {
+      const result = await signInWithPopup(auth, provider);
+      try {
+        await postSignInChecks(result.user, true);
+        toast.success(`Signed in using ${result.user.email}`);
+        navigate(targetAfterLogin, { replace: true });
+      } catch (err) {
+        // If postSignInChecks fails (e.g., unapproved), delete the auth account
+        try {
+          await deleteUser(result.user);
+          console.log("Unauthorized Google account deleted:", result.user.email);
+        } catch (delErr) {
+          console.warn("Failed to delete unauthorized account:", delErr);
+        }
+        // Error message already shown by postSignInChecks
+      }
+    } catch (e: any) {
+      if (
+        e?.code === "auth/popup-blocked" ||
+        e?.code === "auth/operation-not-supported-in-this-environment" ||
+        e?.code === "auth/unauthorized-domain"
+      ) {
+        await signInWithRedirect(auth, provider);
+        return;
+      }
+      if (![
+        "unregistered-user",
+        "email-not-verified",
+        "not-approved",
+        "awaiting-approval"
+      ].some(msg => e?.message?.includes(msg))) {
+        console.error(e);
+        toast.error("Google Sign-In Failed.");
+      }
     }
-
-   
-    if (!["unregistered-user", "awaiting-approval", "not-approved"].some((m) => e?.message?.includes(m))) {
-      toast.error("Google Sign-In failed. Please try again.");
-    }
-  }
-};
+  };
 
   return (
       <div className="form-card">
