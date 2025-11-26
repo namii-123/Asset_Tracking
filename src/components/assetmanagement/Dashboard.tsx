@@ -1,96 +1,43 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import "../../assets/dashboard.css";
 import "../../assets/notification.css";
-import { Link, useNavigate } from 'react-router-dom';
+
+import { Link } from 'react-router-dom';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 import AssetManagement from './AssetManagement';
-import { Package, PlusCircle, AlertCircle, FileBarChart2, QrCode, LogOut } from 'lucide-react';
+import { Package } from 'lucide-react';
+
 import Requests from "./Requests";
+import { Clipboard } from "react-feather"; 
+import { useNavigate } from "react-router-dom";
 import { signOut, updatePassword } from "firebase/auth";
 import { auth, db } from "../../firebase/firebase";
 import { toast } from "react-toastify";
-import { useCurrentUserFullName } from "../../hooks/useCurrentUserFullName";
+import { useCurrentUserFullName } from "../../hooks/useCurrentUserFullName"; 
+
 import SearchInput from './SearchInput';
-import { onAuthStateChanged } from "firebase/auth";
-import { getDoc, collection, query, where, getDocs, doc, updateDoc } from "firebase/firestore";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faEye, faEyeSlash, faUser, faSpinner } from '@fortawesome/free-solid-svg-icons';
+import{
+  LayoutDashboard,
+  PlusCircle,
+  AlertCircle,
+  FileBarChart2,
+  QrCode,
+  LogOut,
+} from 'lucide-react';
+import { 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  doc, 
+  updateDoc 
+} from "firebase/firestore";
 
-// Custom hook: Load profile picture safely
-const useProfilePicture = () => {
-  const [base64, setBase64] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      setLoading(true);
-      if (!user) {
-        setBase64(null);
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const userDocRef = doc(db, "IT_Supply_Users", user.uid);
-        const userDoc = await getDoc(userDocRef);
-
-        if (userDoc.exists()) {
-          const raw = userDoc.data()?.IDPictureBase64 ?? null;
-
-          if (raw) {
-            if (raw.startsWith('data:image')) {
-              setBase64(raw);
-            } else if (/^\/9j/.test(raw) || /^iVBOR/.test(raw)) {
-              setBase64(`data:image/jpeg;base64,${raw}`);
-            } else {
-              console.warn("Invalid base64 format");
-              setBase64(null);
-            }
-          } else {
-            setBase64(null);
-          }
-        } else {
-          setBase64(null);
-        }
-      } catch (error) {
-        console.error("Error fetching profile picture:", error);
-        setBase64(null);
-      } finally {
-        setLoading(false);
-      }
-    });
-
-    return () => unsub();
-  }, []);
-
-  // Create object URL only when base64 changes
-  const pictureUrl = useMemo(() => {
-    if (!base64) return null;
-    try {
-      const binary = atob(base64.split(',')[1]);
-      const array = Uint8Array.from(binary, c => c.charCodeAt(0));
-      const blob = new Blob([array], { type: 'image/jpeg' });
-      return URL.createObjectURL(blob);
-    } catch (e) {
-      console.error("Failed to create blob URL:", e);
-      return null;
-    }
-  }, [base64]);
-
-  // Cleanup object URL
-  useEffect(() => {
-    return () => {
-      if (pictureUrl) URL.revokeObjectURL(pictureUrl);
-    };
-  }, [pictureUrl]);
-
-  return { pictureUrl, loading };
-};
+import { faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons';
 
 const Dashboard = () => {
-  const { fullName, loading: nameLoading } = useCurrentUserFullName();
-  const { pictureUrl, loading: picLoading } = useProfilePicture();
-
+  const { fullName, loading } = useCurrentUserFullName();
   const [currentView, setCurrentView] = useState<'dashboard' | 'qr' | 'generate' | 'requestsdata' | 'reports' | 'reports-analytics' | 'profile' | 'assets' | 'people' | 'request-consumables' | 'manage-consumable-requests'>('assets');
   const [activeView, setActiveView] = useState<'dashboard' | 'generate' | 'reports' | 'requestsdata' | 'reports-analytics' | 'qr' | 'profile' | 'assets' | 'people' | 'request-consumables' | 'manage-consumable-requests'>('assets');
   const [searchQuery, setSearchQuery] = useState('');
@@ -106,10 +53,8 @@ const Dashboard = () => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
   const [showSignOutModal, setShowSignOutModal] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
-  const navigate = useNavigate();
 
-  // Password validation
+  // 🔒 Password validation logic
   const getPasswordErrors = (pwd: string): string[] => {
     const errors: string[] = [];
     if (pwd.length < 8) errors.push("At least 8 characters");
@@ -120,91 +65,33 @@ const Dashboard = () => {
   };
 
   const passwordErrors = getPasswordErrors(newPassword);
-  const toggleNewPasswordVisibility = () => setShowNewPassword(!showNewPassword);
-  const toggleConfirmPasswordVisibility = () => setShowConfirmNewPassword(!showConfirmNewPassword);
 
-  // Check activation status → show password modal if pending
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        setShowChangePasswordModal(false);
-        return;
-      }
-      try {
-        const q = query(collection(db, "IT_Supply_Users"), where("AuthUID", "==", user.uid));
-        const snapshot = await getDocs(q);
-        if (!snapshot.empty) {
-          const userData = snapshot.docs[0].data();
-          setShowChangePasswordModal(userData.ActivationStatus === "pending");
-        }
-      } catch (error) {
-        console.error("Error checking activation status:", error);
-        setShowChangePasswordModal(false);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Handle password change
-  const handleChangePassword = async () => {
-    if (passwordErrors.length > 0) {
-      toast.error("Please fix password requirements.");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      toast.error("Passwords do not match.");
-      return;
-    }
-    const user = auth.currentUser;
-    if (!user) return;
-    setIsUpdating(true);
-    try {
-      await updatePassword(user, newPassword);
-      const q = query(collection(db, "IT_Supply_Users"), where("AuthUID", "==", user.uid));
-      const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        const userRef = doc(db, "IT_Supply_Users", snapshot.docs[0].id);
-        await updateDoc(userRef, { ActivationStatus: "completed" });
-      }
-      toast.success("Password updated successfully!");
-      setShowChangePasswordModal(false);
-      setNewPassword("");
-      setConfirmPassword("");
-    } catch (error: any) {
-      console.error("Error updating password:", error);
-      let msg = "Failed to update password.";
-      if (error.code === "auth/weak-password") msg = "Password too weak.";
-      else if (error.code === "auth/requires-recent-login") msg = "Session expired. Please log in again.";
-      toast.error(msg);
-    } finally {
-      setIsUpdating(false);
-    }
+  const toggleNewPasswordVisibility = () => {
+    setShowNewPassword(!showNewPassword);
   };
 
-  // Sign out
-  const handleSignOut = async () => {
-    if (signingOut) return;
-    setSigningOut(true);
-    try {
-      await signOut(auth);
-      toast.info("Signed out");
-      navigate("/", { replace: true });
-    } catch (err) {
-      console.error(err);
-      toast.error("Sign out failed.");
-    } finally {
-      setSigningOut(false);
-    }
+  const toggleConfirmPasswordVisibility = () => {
+    setShowConfirmNewPassword(!showConfirmNewPassword);
   };
 
-  // Notifications (mock)
   type Notification = {
     id: number;
     message: string;
     timestamp: string;
     isRead: boolean;
+    type?: 'user' | 'application' | 'asset' | 'system';
   };
-  const [notifications] = useState<Notification[]>([
+
+  const navigate = useNavigate();
+
+  const navItems = [
+    { title: "New Asset", category: "Asset" },  
+    { title: "New Accessory", category: "Accessory" },
+    { title: "New Consumable", category: "Consumable" },
+    { title: "New Component", category: "Component" },
+  ];
+
+  const [notifications, setNotifications] = useState<Notification[]>([
     { id: 1, message: 'License Expiring Soon', timestamp: '1h ago', isRead: false },
     { id: 2, message: 'New Asset Assigned', timestamp: '2d ago', isRead: true },
     { id: 3, message: 'Asset Maintenance Required', timestamp: '3h ago', isRead: false },
@@ -219,8 +106,17 @@ const Dashboard = () => {
   );
 
   const toggleNotif = () => setShowNotif(!showNotif);
-  const toggleReadStatus = (id: number) => { /* implement later */ };
-  const handleDelete = (id: number) => { /* implement later */ };
+
+  const toggleReadStatus = (id: number) => {
+    setNotifications(prev =>
+      prev.map(n => n.id === id ? { ...n, isRead: !n.isRead } : n)
+    );
+  };
+
+  const handleDelete = (id: number) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  };
+
   const handleOptionsToggle = (id: number) => {
     setOpenOptionsId(prev => (prev === id ? null : id));
   };
@@ -229,21 +125,29 @@ const Dashboard = () => {
     const lowerMsg = message.toLowerCase();
     if (lowerMsg.includes('profile')) return 'fas fa-user-circle';
     if (lowerMsg.includes('license')) return 'fas fa-id-badge';
+    if (lowerMsg.includes('broken')) return 'fas fa-tools';
     if (lowerMsg.includes('maintenance')) return 'fas fa-cogs';
+    if (lowerMsg.includes('reminder')) return 'fas fa-bell';
+    if (lowerMsg.includes('security')) return 'fas fa-shield-alt';
     if (lowerMsg.includes('report')) return 'fas fa-file-alt';
     if (lowerMsg.includes('approval') || lowerMsg.includes('request')) return 'fas fa-check-circle';
-    if (lowerMsg.includes('meeting')) return 'fas fa-users';
+    if (lowerMsg.includes('meeting') || lowerMsg.includes('team')) return 'fas fa-users';
     return 'fas fa-info-circle';
   };
 
-  const toggleSidebar = () => setSidebarCollapsed(!sidebarCollapsed);
+  const toggleSidebar = () => {
+    setSidebarCollapsed(!sidebarCollapsed);
+  };
 
-  const navItems = [
-    { title: "New Asset", category: "Asset" },
-    { title: "New Accessory", category: "Accessory" },
-    { title: "New Consumable", category: "Consumable" },
-    { title: "New Component", category: "Component" },
-  ];
+  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value);
+    console.log('Searching:', e.target.value);
+  };
+
+  interface UserDoc {
+    AuthUID: string;
+    ActivationStatus?: string;
+  }
 
   const dashboardData = {
     desktops: { total: 132, functional: 92, defective: 10, unserviceable: 30 },
@@ -252,8 +156,13 @@ const Dashboard = () => {
     servers: { total: 20, functional: 15, defective: 3, unserviceable: 2 },
     otherDevices: { total: 90, functional: 33, defective: 17, unserviceable: 40 },
     accessories: { total: 90, functional: 17, defective: 32, unserviceable: 41 },
-    components: { total: 50, functional: 30, defective: 10, unserviceable: 10 },
-    licenses: { total: 60, expiringIn1Month: 20, expiringIn2Months: 25, expiringIn3Months: 20 },
+    components:  { total: 50, functional: 30, defective: 10, unserviceable: 10 },
+    licenses: {
+      total: 60,
+      expiringIn1Month: 20,
+      expiringIn2Months: 25,
+      expiringIn3Months: 20,
+    },
     consumables: { total: 200 },
     machineryEquipment: { total: 150 },
     functionalProperty: { total: 80 },
@@ -261,11 +170,20 @@ const Dashboard = () => {
     defectiveProperty: { total: 60 },
     assignedCustodian: { total: 50 },
     unserviceableProperty: { total: 70 },
-    otherTable: [{ category: 'People', users: 10, toApprove: 3 }],
-    newItems: { asset: 5, licenses: 3, accessory: 2, consumable: 1, components: 5 },
+    otherTable: [
+      { category: 'People', users: 10, toApprove: 3 },
+    ],
+    newItems: {
+      asset: 5,
+      licenses: 3,
+      accessory: 2,
+      consumable: 1,
+      components: 5,
+    },
   };
 
   const [showCards, setShowCards] = useState(false);
+
   const items = [
     { label: 'Consumables', total: dashboardData.consumables.total, icon: 'fas fa-tint', viewLink: 'consumables' },
     { label: 'Machinery & Equipment', total: dashboardData.machineryEquipment.total, icon: 'fas fa-building', viewLink: 'machineryEquipment' },
@@ -276,34 +194,123 @@ const Dashboard = () => {
     { label: 'Unserviceable Property', total: dashboardData.unserviceableProperty.total, icon: 'fas fa-exclamation-triangle', viewLink: 'unserviceableProperty' }
   ];
 
+  const handleChangePassword = async () => {
+    if (passwordErrors.length > 0) {
+      toast.error("Please fix password requirements.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast.error("Passwords do not match.");
+      return;
+    }
+
+    const user = auth.currentUser;
+    if (!user) return;
+
+    setIsUpdating(true);
+
+    try {
+      await updatePassword(user, newPassword);
+
+      const q = query(collection(db, "IT_Supply_Users"), where("AuthUID", "==", user.uid));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        const userRef = doc(db, "IT_Supply_Users", snapshot.docs[0].id);
+        await updateDoc(userRef, { ActivationStatus: "completed" });
+      }
+
+      toast.success("✅ Password updated successfully!");
+      setShowChangePasswordModal(false);
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (error: any) {
+      console.error("Error updating password:", error);
+      let msg = "Failed to update password.";
+      if (error.code === "auth/weak-password") {
+        msg = "Password is too weak. Use at least 8 characters with letters and numbers.";
+      } else if (error.code === "auth/requires-recent-login") {
+        msg = "Session expired. Please log in again.";
+      }
+      toast.error(msg);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const [signingOut, setSigningOut] = useState(false);
+  const handleSignOut = async (e?: React.MouseEvent<HTMLButtonElement | HTMLAnchorElement>) => {
+    e?.preventDefault();
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await signOut(auth);
+      toast.info("Signed out");
+      navigate("/", { replace: true });
+    } catch (err) {
+      console.error(err);
+      toast.error("Sign out failed.");
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (!user) {
+        setShowChangePasswordModal(false);
+        return;
+      }
+
+      try {
+        const q = query(collection(db, "IT_Supply_Users"), where("AuthUID", "==", user.uid));
+        const snapshot = await getDocs(q);
+        
+        if (!snapshot.empty) {
+          const userData = snapshot.docs[0].data() as UserDoc;
+          if (userData.ActivationStatus === "pending") {
+            setShowChangePasswordModal(true);
+          } else {
+            setShowChangePasswordModal(false);
+          }
+        }
+      } catch (error) {
+        console.error("Error checking activation status:", error);
+        setShowChangePasswordModal(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   return (
     <div className="dashboard-body">
-      {/* Block interaction if password modal is open */}
-      {showChangePasswordModal && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.7)',
-            zIndex: 999,
-            pointerEvents: 'auto',
-          }}
-          onClick={(e) => e.stopPropagation()}
-        />
-      )}
-
       <div className={`dashboard-container ${sidebarCollapsed ? 'collapsed' : ''}`}>
         <aside className="sidebar">
           <div className="sidebar-header">
             <div
-              onClick={() => { setCurrentView('assets'); setActiveView('assets'); }}
+              onClick={() => {
+                setCurrentView('dashboard');
+                setActiveView('dashboard');
+                navigate('/dashadmin');
+              }}
               role="button"
               tabIndex={0}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setCurrentView('assets'); setActiveView('assets'); } }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  setCurrentView('dashboard');
+                  setActiveView('dashboard');
+                  navigate('/dashadmin');
+                }
+              }}
               style={{ cursor: 'pointer', display: 'inline-block' }}
-              aria-label="Go to Asset Management"
+              aria-label="Go to dashadmin"
             >
-              <img className="dashboard-logos" src="/logosaproject.jpg" alt="DOH Logo" />
+              <img
+                className="dashboard-logos"
+                src="/logosaproject.jpg"
+                alt="DOH Logo"
+              />
             </div>
             <div className="logo-doh">DOH-TRC Argao</div>
             <button className="toggle-sidebar-btns" onClick={toggleSidebar}>
@@ -311,36 +318,115 @@ const Dashboard = () => {
             </button>
           </div>
           <nav className="menu">
-            <Link to="#" className={`menu-items ${activeView === 'assets' ? 'active' : ''}`}
-              onClick={() => { setCurrentView('assets'); setActiveView('assets'); }}>
+            {/* <Link
+              to="#"
+              className={`menu-items ${activeView === 'dashboard' ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentView('dashboard');
+                setActiveView('dashboard');
+              }}
+            >
+              <LayoutDashboard className="menu-icon" />
+              <span>Dashboard</span>
+            </Link> */}
+
+            <Link
+              to="#"
+              className={`menu-items ${activeView === 'assets' ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentView('assets');
+                setActiveView('assets');
+              }}
+            >
               <Package className="menu-icon" />
               <span>Asset Management</span>
             </Link>
-            <Link to="#" className={`menu-items ${activeView === 'generate' ? 'active' : ''}`}
-              onClick={() => { setCurrentView('generate'); setActiveView('generate'); }}>
+
+            <Link
+              to="#"
+              className={`menu-items ${activeView === 'generate' ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentView('generate');
+                setActiveView('generate');
+              }}
+            >
               <PlusCircle className="menu-icon" />
               <span>Add Asset</span>
             </Link>
-            <Link to="#" className={`menu-items ${activeView === 'request-consumables' ? 'active' : ''}`}
-              onClick={() => { setCurrentView('request-consumables'); setActiveView('request-consumables'); navigate('/request-consumables'); }}>
-              <i className="fas fa-boxes menu-icon"></i>
-              <span>Request Consumables</span>
-            </Link>
-            <Link to="#" className={`menu-items ${activeView === 'reports' ? 'active' : ''}`}
-              onClick={() => { setCurrentView('reports'); setActiveView('reports'); }}>
+            <Link
+                to="#"
+                className={`menu-items ${activeView === 'request-consumables' ? 'active' : ''}`}
+                onClick={() => {
+                  setCurrentView('request-consumables');
+                  setActiveView('request-consumables');
+                  navigate('/request-consumables');
+                }}
+              >
+                <i className="fas fa-boxes menu-icon"></i>
+                <span>Request Consumables</span>
+              </Link>
+
+              <Link
+                to="#"
+                className={`menu-items ${activeView === 'manage-consumable-requests' ? 'active' : ''}`}
+                onClick={() => {
+                  setCurrentView('manage-consumable-requests');
+                  setActiveView('manage-consumable-requests');
+                  navigate('/manage-consumable-requests');
+                }}
+              >
+                <i className="fas fa-tasks menu-icon"></i>
+                <span>Manage Requests</span>
+              </Link>
+
+            <Link
+              to="#"
+              className={`menu-items ${activeView === 'reports' ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentView('reports');
+                setActiveView('reports');
+              }}
+            >
               <AlertCircle className="menu-icon" />
               <span>Reported Issues</span>
             </Link>
-            <Link to="#" className={`menu-items ${activeView === 'reports-analytics' ? 'active' : ''}`}
-              onClick={() => { setCurrentView('reports-analytics'); setActiveView('reports-analytics'); }}>
+
+            <Link
+              to="#"
+              className={`menu-items ${activeView === 'reports-analytics' ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentView('reports-analytics');
+                setActiveView('reports-analytics');
+              }}
+            >
               <FileBarChart2 className="menu-icon" />
               <span>Reports / Analytics</span>
             </Link>
-            <Link to="#" className={`menu-items ${activeView === 'qr' ? 'active' : ''}`}
-              onClick={() => { setCurrentView('qr'); setActiveView('qr'); }}>
+
+            <Link
+              to="#"
+              className={`menu-items ${activeView === 'qr' ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentView('qr');
+                setActiveView('qr');
+              }}
+            >
               <QrCode className="menu-icon" />
               <span>QR Scanner</span>
             </Link>
+
+            {/* <Link
+              to="#"
+              className={`menu-item ${activeView === 'requestsdata' ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentView('requestsdata');
+                setActiveView('requestsdata');
+              }}
+            >
+              <Clipboard className="menu-icon" />
+              <span>Request</span>
+            </Link> */}
+
             <Link to="#" className="menu-items logout"
               onClick={(e) => { e.preventDefault(); setShowSignOutModal(true); }}
               aria-disabled={signingOut}>
@@ -352,69 +438,263 @@ const Dashboard = () => {
 
         <div className="main-content">
           <header className="main-header">
-            {(currentView === 'reports' || currentView === 'assets') && <SearchInput placeholder="Search assets or personnel..." />}
-            {currentView === 'dashboard' && <h2 className="asset-overview-heading">Dashboard Overview</h2>}
-            {currentView === 'generate' && <h2 className="asset-overview-heading">Add Asset</h2>}
-            {(currentView !== 'reports' && currentView !== 'assets' && currentView !== 'dashboard' && currentView !== 'generate') && <div style={{ width: '250px' }}></div>}
-
+            {(currentView === 'reports' || currentView === 'assets') && (
+              <SearchInput placeholder="Search assets or personnel..." />
+            )}
+            {(currentView === 'dashboard') && (
+              <h2 className="asset-overview-heading">Dashboard Overview</h2>
+            )}
+            {(currentView === 'generate') && (
+              <h2 className="asset-overview-heading">Add Asset</h2>
+            )}
+            {(currentView !== 'reports' && currentView !== 'assets') && (
+              <div className="search-placeholder" style={{ width: '250px' }}></div>
+            )}
             <div className="user-info">
-              <div
-                className="profile-picture-circle"
-                onClick={() => { setCurrentView('profile'); setActiveView('profile'); }}
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '50%',
-                  overflow: 'hidden',
-                  border: '2px solid #0d6efd',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: '#f5f5f5',
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
+              <span className="notif" onClick={toggleNotif}>🔔</span>
+              <img
+                src="/user.png"
+                alt="User"
+                className="user-icon"
+                onClick={() => {
+                  setCurrentView('profile');
+                  setActiveView('profile');
                 }}
-              >
-                {picLoading ? (
-                  <FontAwesomeIcon icon={faSpinner} spin style={{ color: '#999', fontSize: '18px' }} />
-                ) : pictureUrl ? (
-                  <img
-                    src={pictureUrl}
-                    alt="Profile"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                      const icon = e.currentTarget.nextElementSibling as HTMLElement;
-                      if (icon) icon.classList.remove('hidden');
-                    }}
-                  />
-                ) : null}
-                <FontAwesomeIcon
-                  icon={faUser}
-                  className="hidden"
-                  style={{ fontSize: '20px', color: '#666' }}
-                />
-              </div>
-
+              />
               <span
                 className="welcome-text"
-                onClick={() => { setCurrentView('profile'); setActiveView('profile'); }}
-                style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  setCurrentView('profile');
+                  setActiveView('profile');
+                }}
               >
-                {nameLoading ? "Loading..." : fullName || "User"}
+                {fullName || "User"}
               </span>
+
+              {showNotif && (
+                <div className="notif-popup">
+                  <h3>Notifications</h3>
+                  <div className="notif-filter">
+                    <button
+                      className={notificationFilter === 'all' ? 'active-filter' : ''}
+                      onClick={() => setNotificationFilter('all')}
+                    >
+                      All
+                    </button>
+                    <button
+                      className={notificationFilter === 'unread' ? 'active-filter' : ''}
+                      onClick={() => setNotificationFilter('unread')}
+                    >
+                      Unread
+                    </button>
+                  </div>
+                  <ul>
+                    {(showAll ? filteredNotifications : filteredNotifications.slice(0, 4)).map((notif) => (
+                      <li key={notif.id} className="notification-item">
+                        <div className="notification-left" onClick={() => toggleReadStatus(notif.id)}>
+                          <i className={`notification-icon ${getIconClass(notif.message)}`}></i>
+                          <div className="notification-message">
+                            <span className="text" style={{ fontWeight: notif.isRead ? 'normal' : 'bold' }}>
+                              {notif.message}
+                            </span>
+                            <span className="timestamp">{notif.timestamp}</span>
+                          </div>
+                        </div>
+                        <div className="notification-options" onClick={() => handleOptionsToggle(notif.id)}>
+                          ⋮
+                          {openOptionsId === notif.id && (
+                            <div className="notification-options-menu">
+                              <button className="delete-btn" onClick={(e) => { e.stopPropagation(); handleDelete(notif.id); }}>
+                                <i className="fas fa-trash-alt"></i>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  {filteredNotifications.length > 5 && (
+                    <button className="show-toggle" onClick={() => setShowAll(!showAll)}>
+                      {showAll ? 'Show Less' : 'Show More'}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </header>
 
           <div className="content-here">
             {currentView === 'dashboard' && (
               <div className="table-content">
-                {/* Your dashboard content here */}
+                <div className='tabless'>
+                  {/* ===== Asset Status Cards ===== */}
+                  {[
+                    { label: 'Desktops', data: dashboardData.desktops },
+                    { label: 'Laptops',  data: dashboardData.laptops  },
+                    { label: 'Printers', data: dashboardData.printers },
+                    { label: 'Servers',  data: dashboardData.servers  },
+                    { label: 'Other Devices', data: dashboardData.otherDevices },
+                    { label: 'Accessories', data: dashboardData.accessories },
+                    { label: 'Components', data: dashboardData.components },
+                  ].map((item, i) => {
+                    const total = item.data.functional + item.data.defective + item.data.unserviceable;
+                    return (
+                      <div className="asset-bar-card" key={i}>
+                        <h3>{item.label}</h3>
+                        <p className="total-count">Total: {total}</p>
+                        <div className="bar-row">
+                          <span className="label">FUNCTIONAL</span>
+                          <div className="progress-bar bg-green">
+                            <div className="progress-fill" style={{ width: `${(item.data.functional / total) * 100}%` }} />
+                          </div>
+                          <span className="value">{item.data.functional}</span>
+                        </div>
+                        <div className="bar-row">
+                          <span className="label">DEFECTIVE</span>
+                          <div className="progress-bar bg-yellow">
+                            <div className="progress-fill" style={{ width: `${(item.data.defective / total) * 100}%` }} />
+                          </div>
+                          <span className="value">{item.data.defective}</span>
+                        </div>
+                        <div className="bar-row">
+                          <span className="label">UNSERVICEABLE</span>
+                          <div className="progress-bar bg-red">
+                            <div className="progress-fill" style={{ width: `${(item.data.unserviceable / total) * 100}%` }} />
+                          </div>
+                          <span className="value">{item.data.unserviceable}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* ===== License Status Card ===== */}
+                  <div className="asset-bar-card">
+                    <h3>Licenses</h3>
+                    <p className="total-count">Total: {dashboardData.licenses.total}</p>
+                    <div className="bar-row">
+                      <span className="label">EXPIRE IN 1 MONTH</span>
+                      <div className="progress-bar bg-green">
+                        <div className="progress-fill" style={{ width: `${(dashboardData.licenses.expiringIn1Month / dashboardData.licenses.total) * 100}%` }} />
+                      </div>
+                      <span className="value">{dashboardData.licenses.expiringIn1Month}</span>
+                    </div>
+                    <div className="bar-row">
+                      <span className="label">EXPIRE IN 2 MONTHS</span>
+                      <div className="progress-bar bg-yellow">
+                        <div className="progress-fill" style={{ width: `${(dashboardData.licenses.expiringIn2Months / dashboardData.licenses.total) * 100}%` }} />
+                      </div>
+                      <span className="value">{dashboardData.licenses.expiringIn2Months}</span>
+                    </div>
+                    <div className="bar-row">
+                      <span className="label">EXPIRE IN 3 MONTHS</span>
+                      <div className="progress-bar bg-red">
+                        <div className="progress-fill" style={{ width: `${(dashboardData.licenses.expiringIn3Months / dashboardData.licenses.total) * 100}%` }} />
+                      </div>
+                      <span className="value">{dashboardData.licenses.expiringIn3Months}</span>
+                    </div>
+                  </div>
+
+                  {/* ===== People Table ===== */}
+                  <div className="table-cards table3-card">
+                    <h3>People</h3>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Category</th>
+                          <th>No. of Users</th>
+                          <th>To Approve</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dashboardData.otherTable
+                          .filter(r => r.category === 'People')
+                          .map((r, i) => (
+                            <tr key={i}>
+                              <td>{r.category}</td>
+                              <td>{r.users}</td>
+                              <td>{r.toApprove}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                    <div className="view-more-container">
+                      <button
+                        className="view-more-button"
+                        onClick={() => {
+                          setCurrentView('people');
+                          setActiveView('people');
+                        }}
+                      >
+                        View more → 
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className='new-card'>
+                    <div className="new-item-cards-container">
+                      {navItems.map((item, i) => (
+                        <div
+                          className={`new-item-card ${item.category}`}
+                          key={i}
+                          onClick={() => navigate("/generate-qr", { state: { category: item.category } })}
+                          style={{ cursor: "pointer" }}
+                        >
+                          <h3>{item.title}</h3>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className='dashboard-columns'>
+                  <div className='simple'>
+                    <div className='show-more-wrapper'>
+                      <button onClick={() => setShowCards(!showCards)}>
+                        {showCards ? 'Show Less' : 'Show More'}
+                      </button>
+                    </div>
+                    <div className='simplecard'>
+                      {showCards &&
+                        items.map((item, i) => (
+                          <div
+                            key={i}
+                            style={{
+                              backgroundColor: 'white',
+                              borderRadius: '10px',
+                              padding: '15px',
+                              color: '#333',
+                              gap: '2rem',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              justifyContent: 'space-between',
+                              position: 'relative',
+                              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                            }}
+                          >
+                            <div>
+                              <div>{item.total}</div>
+                              <i className={item.icon}></i>
+                            </div>
+                            <div>{item.label}</div>
+                            <div
+                              onClick={() => {
+                                setCurrentView(item.viewLink as any);
+                                setActiveView(item.viewLink as any);
+                              }}
+                            >
+                              <span>VIEW ALL</span>
+                              <i className="fas fa-arrow-right"></i>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
             {currentView === 'assets' && <AssetManagement />}
+
             {currentView === 'requestsdata' && <Requests />}
-            {/* Add other views as needed */}
           </div>
         </div>
       </div>
